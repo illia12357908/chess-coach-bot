@@ -8,7 +8,7 @@
 //   GITHUB_REPO        (text)    illia12357908/chess-coach-bot
 //   GITHUB_TOKEN       (secret)  fine-grained GitHub token, only "Actions: Read and write" on that repo
 
-const WINDOW_SECONDS = 100;
+const WINDOW_SECONDS = 240; // a bit wider than the 1-minute cron so a late or skipped tick still catches the game
 
 async function latestGame(user) {
   const opts = { headers: { "User-Agent": `chess-watcher (chess.com user ${user})` } };
@@ -63,8 +63,13 @@ export default {
     );
   },
   // Opening the Worker URL in a browser is a safe self-test: it only reads chess.com and never starts anything.
+  // Add ?dispatch=1 to the URL to really start the GitHub workflow once and see GitHub's answer (token test).
   async fetch(request, env) {
     try {
+      if (new URL(request.url).searchParams.get("dispatch") === "1") {
+        try { await dispatch(env); return Response.json({ ok: true, dispatched: true }); }
+        catch (e) { return Response.json({ ok: false, error: String(e) }, { status: 500 }); }
+      }
       const res = await check(env);
       const config = { user: !!env.CHESSCOM_USERNAME, repo: !!env.GITHUB_REPO, token: !!env.GITHUB_TOKEN };
       return Response.json({ ok: true, config, latest_game: res });
