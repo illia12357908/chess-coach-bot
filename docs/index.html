@@ -24,6 +24,11 @@ a{color:#8cb4ff}
 .ctrl{display:flex;gap:6px;margin-top:10px}
 .ctrl button{flex:1;background:var(--panel2);color:var(--tx);border:0;border-radius:8px;padding:9px 0;font-size:22px;line-height:1.1;cursor:pointer}
 .ctrl button:active{background:#454340}
+.ctrl svg{width:22px;height:22px;display:block;margin:0 auto;fill:currentColor}
+.ctrl button#bPlay{background:var(--acc);color:#10200a}
+#info .tip{margin-top:6px;padding:7px 10px;border-left:3px solid var(--acc);background:var(--panel2);border-radius:0 6px 6px 0}
+#info .tip b{color:var(--acc)}
+.stop{margin-top:6px;color:var(--acc);font-weight:700;font-size:13px}
 #info{margin-top:10px;min-height:62px}
 .mvtitle{font-weight:700;font-size:16px;display:flex;align-items:center;gap:8px}
 .dot{width:12px;height:12px;border-radius:50%;display:inline-block}
@@ -56,7 +61,7 @@ h2{margin:0 0 8px;font-size:14px;color:var(--mut);text-transform:uppercase;lette
  <div>
   <div class="card">
    <div class="boardrow"><div id="evalbar"><div id="evalfill"></div></div><svg id="board" viewBox="0 0 800 800"></svg></div>
-   <div class="ctrl"><button id="bFirst" title="Start">⏮</button><button id="bPrev" title="Back">‹</button><button id="bPlay" title="Autoplay">▶</button><button id="bNext" title="Forward">›</button><button id="bLast" title="End">⏭</button><button id="bFlip" title="Flip board">⇅</button><button id="bSnd" title="Sound on/off">🔊</button></div>
+   <div class="ctrl"><button id="bFirst" title="Start"></button><button id="bPrev" title="Back"></button><button id="bPlay" title="Play review (stops at key moments)"></button><button id="bNext" title="Forward"></button><button id="bLast" title="End"></button><button id="bFlip" title="Flip board"></button><button id="bSnd" title="Sound on/off"></button></div>
    <div id="info"></div><div id="momnav"><button id="mPrev">« Previous key moment</button><button id="mNext" class="go">Next key moment »</button></div>
   </div>
  </div>
@@ -87,7 +92,7 @@ const COL={R:'#1baca6',B:'#e5483f',M:'#f0892b',I:'#f2c230',T:'#8dbb3f',X:'#6aa84
 const SYM={R:'!!',B:'??',M:'?',I:'?!',T:'★',X:'✓',O:'✓'};
 const NAME={R:'Brilliant',B:'Blunder',M:'Mistake',I:'Inaccuracy',T:'Best move',X:'Excellent',O:'Good'};
 const PN={K:'king',Q:'queen',R:'rook',B:'bishop',N:'knight',P:'pawn'};
-let idx=0,flip=M.me==='black',alt=false,timer=null;
+let idx=0,flip=M.me==='black',alt=false,timer=null,inTick=false;
 const wp=cp=>{cp=Math.max(-1000,Math.min(1000,cp));return 50+50*(2/(1+Math.exp(-0.00368208*cp))-1)};
 const fmt=cp=>Math.abs(cp)>=9000?(cp>0?'+M':'-M'):((cp>0?'+':'')+(cp/100).toFixed(1));
 const cpAt=i=>i===0?D.start_cp:P[i-1].cp;
@@ -151,7 +156,17 @@ function snd(kind){if(muted)return;try{AC=AC||new(window.AudioContext||window.we
   }catch(e){}}
 function soundFor(i){if(i<=0)return;const p=P[i-1];
   if(i===N)snd('end');else if(/[+#]$/.test(p.s))snd('check');else if(/^O-O/.test(p.s))snd('castle');else if(p.s.includes('x'))snd('capture');else snd('move')}
-function syncSnd(){$('bSnd').textContent=muted?'🔇':'🔊'}
+const IC={
+ first:'<svg viewBox="0 0 24 24"><path d="M6 5h2.4v14H6zM19 5v14L9.5 12z"/></svg>',
+ prev:'<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" style="fill:none;stroke:currentColor;stroke-width:2.8;stroke-linecap:round;stroke-linejoin:round"/></svg>',
+ next:'<svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" style="fill:none;stroke:currentColor;stroke-width:2.8;stroke-linecap:round;stroke-linejoin:round"/></svg>',
+ last:'<svg viewBox="0 0 24 24"><path d="M15.6 5H18v14h-2.4zM5 5v14l9.5-7z"/></svg>',
+ play:'<svg viewBox="0 0 24 24"><path d="M7 4.5v15l12.5-7.5z"/></svg>',
+ pause:'<svg viewBox="0 0 24 24"><path d="M6.5 5h4v14h-4zM13.5 5h4v14h-4z"/></svg>',
+ flip:'<svg viewBox="0 0 24 24"><path d="M8 3 4 7h3v9h2V7h3zM16 21l4-4h-3V8h-2v9h-3z"/></svg>',
+ on:'<svg viewBox="0 0 24 24"><path d="M3 9.5v5h3.6L12 19V5L6.6 9.5z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" style="fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round"/></svg>',
+ off:'<svg viewBox="0 0 24 24"><path d="M3 9.5v5h3.6L12 19V5L6.6 9.5z"/><path d="M15.5 9.5l5 5M20.5 9.5l-5 5" style="fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round"/></svg>'};
+function syncSnd(){$('bSnd').innerHTML=muted?IC.off:IC.on}
 function renderBoard(){
   const view=(alt&&idx>0)?idx-1:idx;let s='';
   for(let f=0;f<8;f++)for(let r=0;r<8;r++){const [x,y]=xy(f,r);s+=`<rect x="${x}" y="${y}" width="100" height="100" fill="${(f+r)%2?'#ebecd0':'#739552'}"/>`}
@@ -173,7 +188,8 @@ function renderBoard(){
   fill.style.height=pct+'%';fill.style[flip?'top':'bottom']='0';fill.style[flip?'bottom':'top']='auto';
 }
 const mineSide=M.me==='white'?0:1;
-const moments=[];for(let k=0;k<N;k++)if(P[k].c==='B'||P[k].c==='M')moments.push(k+1);
+const isKey=k=>{const c=P[k].c,mine=(k%2===mineSide);return c==='R'||(mine&&(c==='B'||c==='M'))||(!mine&&c==='B')};
+const moments=[];for(let k=0;k<N;k++)if(isKey(k))moments.push(k+1);
 function nextMoment(d){let t=null;
   if(d>0){t=moments.find(m=>m>idx)}else{for(const m of moments)if(m<idx)t=m}
   if(t===null||t===undefined){$('info').insertAdjacentHTML('beforeend','<div class="why" style="color:var(--mut)">No more key moments in that direction.</div>');return}
@@ -203,6 +219,14 @@ function explain(k){
     }else if(k+1<N&&P[k+1]&&(P[k+1].c==='T'||P[k+1].c==='X'))t+=' You took advantage of it.';
     else if(k+1<N&&P[k+1])t+=' This was a chance to gain an advantage.';
   }
+  if(mine&&'BMI'.includes(p.c)){
+    const tg=p.t.split('|').filter(Boolean);let tip='';
+    if(tg.some(g=>g.startsWith('hung ')))tip='Before you release a piece, ask: what can they capture after this move?';
+    else if(tg.includes('missed mate'))tip='When their king looks exposed, list every check first. One of them may end the game.';
+    else if(tg.includes('allowed mate'))tip='Before moving a defender of your king, look at their checks and forcing replies.';
+    else if(tg.includes('missed tactic')||tg.includes('missed material'))tip='Before a quiet move, scan checks, captures and threats for both sides.';
+    else tip='Compare two or three candidate moves before you play'+(bestSan?` — here <b>${esc(bestSan)}</b> was stronger.`:'.');
+    t+=`<div class="tip"><b>Next time:</b> ${tip}</div>`}
   return t}
 function renderInfo(){
   if(idx===0){$('info').innerHTML=`<div class="mvtitle">Start of the game</div><div class="why" style="color:var(--mut)">Press <b>Next key moment</b> for a guided tour of the turning points, or step through with ▶ and the arrow keys.</div>`;return}
@@ -234,10 +258,15 @@ function renderMoves(){
   const on=document.querySelector('#moves .mv.on');if(on){const c=$('moves');const t=on.offsetTop-c.offsetTop-c.clientHeight/2+on.clientHeight;c.scrollTo({top:t,behavior:'smooth'})}
 }
 function render(){renderBoard();renderInfo();renderGraph();renderMoves()}
-function go(i,quiet){const prev=idx;idx=Math.max(0,Math.min(N,i));alt=false;render();if(!quiet&&Math.abs(idx-prev)===1)soundFor(idx);else if(!quiet&&idx!==prev&&idx>0)snd('move')}
+function go(i,quiet){if(timer&&!quiet&&!inTick){stopPlay()}
+  const prev=idx;idx=Math.max(0,Math.min(N,i));alt=false;render();if(!quiet&&Math.abs(idx-prev)===1)soundFor(idx);else if(!quiet&&idx!==prev&&idx>0)snd('move')}
 function step(d){go(idx+d)}
-function play(){if(timer){clearInterval(timer);timer=null;$('bPlay').textContent='▶';return}
-  if(idx>=N)idx=0;$('bPlay').textContent='⏸';timer=setInterval(()=>{if(idx>=N){play();return}step(1)},900)}
+function stopPlay(){if(timer){clearInterval(timer);timer=null}$('bPlay').innerHTML=IC.play}
+function play(){if(timer){stopPlay();return}
+  if(idx>=N)go(0,true);$('bPlay').innerHTML=IC.pause;
+  timer=setInterval(()=>{if(idx>=N){stopPlay();return}inTick=true;step(1);inTick=false;
+    if(idx>0&&isKey(idx-1)){stopPlay();$('info').insertAdjacentHTML('beforeend','<div class="stop">Paused at a key moment. Press play to continue.</div>')}
+    else if(idx>=N)stopPlay()},520)}
 function init(){
   const me=M.me==='white'?M.white:M.black,opp=M.me==='white'?M.black:M.white;
   $('title').innerHTML=`<span class="res ${M.outcome}">${M.outcome==='win'?'Win':M.outcome==='loss'?'Loss':'Draw'}</span>${esc(M.white)} vs ${esc(M.black)}`;
@@ -253,6 +282,7 @@ function init(){
   buildMoves();render();
 }
 $('bFirst').onclick=()=>go(0);$('bLast').onclick=()=>go(N);$('bPrev').onclick=()=>step(-1);$('bNext').onclick=()=>step(1);
+$('bFirst').innerHTML=IC.first;$('bPrev').innerHTML=IC.prev;$('bNext').innerHTML=IC.next;$('bLast').innerHTML=IC.last;$('bFlip').innerHTML=IC.flip;$('bPlay').innerHTML=IC.play;
 $('bPlay').onclick=play;$('bSnd').onclick=()=>{muted=!muted;try{localStorage.setItem('chessMute',muted?'1':'0')}catch(e){}syncSnd();if(!muted)snd('move')};syncSnd();$('mNext').onclick=()=>nextMoment(1);$('mPrev').onclick=()=>nextMoment(-1);$('bFlip').onclick=()=>{flip=!flip;render()};
 document.addEventListener('keydown',e=>{
   if(e.key==='ArrowLeft'){step(-1);e.preventDefault()}else if(e.key==='ArrowRight'){step(1);e.preventDefault()}
