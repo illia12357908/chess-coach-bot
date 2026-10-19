@@ -8,17 +8,18 @@
 //   GITHUB_REPO        (text)    illia12357908/chess-coach-bot
 //   GITHUB_TOKEN       (secret)  fine-grained GitHub token, only "Actions: Read and write" on that repo
 
-const WINDOW_SECONDS = 240; // a bit wider than the 1-minute cron so a late or skipped tick still catches the game
+const WINDOW_SECONDS = 1200; // chess.com can publish a finished game minutes late, so look back 20 min (extra runs are harmless)
 
 async function latestGame(user) {
-  const opts = { headers: { "User-Agent": `chess-watcher (chess.com user ${user})` } };
+  const opts = { headers: { "User-Agent": `chess-watcher (chess.com user ${user})`, "Cache-Control": "no-cache" } };
+  const bust = () => `?_=${Date.now()}`;
   const base = `https://api.chess.com/pub/player/${user.toLowerCase()}`;
-  const archRes = await fetch(`${base}/games/archives`, opts);
+  const archRes = await fetch(`${base}/games/archives${bust()}`, opts);
   if (!archRes.ok) throw new Error(`chess.com archives: HTTP ${archRes.status}`);
   const arch = await archRes.json();
   const last = (arch.archives || []).slice(-1)[0];
   if (!last) return null;
-  const monthRes = await fetch(last, opts);
+  const monthRes = await fetch(last + bust(), opts);
   if (!monthRes.ok) throw new Error(`chess.com month: HTTP ${monthRes.status}`);
   const games = ((await monthRes.json()).games || []).filter((g) => g.rules === "chess" && g.end_time);
   if (!games.length) return null;

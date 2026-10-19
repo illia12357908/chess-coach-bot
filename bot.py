@@ -136,9 +136,12 @@ class State:
 
 
 def cc_get(url, username):
+    # chess.com caches these endpoints for a few minutes; a changing query string and no-cache headers get fresh data
     r = requests.get(
         url,
-        headers={"User-Agent": f"chess-report-bot (chess.com user: {username})"},
+        params={"_": int(time.time())},
+        headers={"User-Agent": f"chess-report-bot (chess.com user: {username})",
+                 "Cache-Control": "no-cache", "Pragma": "no-cache"},
         timeout=30,
     )
     if r.status_code == 404:
