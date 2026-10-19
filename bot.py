@@ -42,11 +42,38 @@ log = logging.getLogger("chessbot")
 # --------------------------------------------------------------------------- config
 
 
+def clean_token(raw):
+    """Fix common copy/paste mistakes: spaces, quotes, angle brackets, a leading 'bot'."""
+    t = re.sub(r"\s+", "", raw).strip("\"'<>")
+    if t.lower().startswith("bot") and ":" in t:
+        t = t[3:]
+    return t
+
+
+def check_telegram_settings(cfg):
+    """Fail early with a clear message (never prints the secret itself)."""
+    t = cfg.tg_token
+    if not re.fullmatch(r"\d{6,}:[A-Za-z0-9_-]{30,}", t):
+        sys.exit(
+            "TELEGRAM_BOT_TOKEN has the wrong format "
+            f"(length={len(t)}, has ':'={':' in t}, starts with digits={t[:1].isdigit()}). "
+            "Copy the token again from @BotFather -> /mybots -> your bot -> API Token and re-save the secret.")
+    if not re.fullmatch(r"-?\d+", cfg.tg_chat):
+        sys.exit("TELEGRAM_CHAT_ID must be a number like 123456789 "
+                 f"(length={len(cfg.tg_chat)}). Check the secret.")
+    r = requests.get(f"https://api.telegram.org/bot{t}/getMe", timeout=30)
+    if r.status_code != 200:
+        sys.exit(f"Telegram rejected the bot token (HTTP {r.status_code}). The secret does not match a "
+                 "valid token: it may be an old revoked token or have a typo (watch I vs l, O vs 0). "
+                 "Get it again from @BotFather and re-save the secret TELEGRAM_BOT_TOKEN.")
+    log.info("Telegram token OK for @%s", r.json()["result"].get("username"))
+
+
 class Config:
     def __init__(self, require_telegram=True):
         self.username = os.environ.get("CHESSCOM_USERNAME", "").strip()
-        self.tg_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-        self.tg_chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+        self.tg_token = clean_token(os.environ.get("TELEGRAM_BOT_TOKEN", ""))
+        self.tg_chat = re.sub(r"\s+", "", os.environ.get("TELEGRAM_CHAT_ID", "")).strip("\"'")
         self.stockfish = os.environ.get("STOCKFISH_PATH", "stockfish")
         self.depth = int(os.environ.get("ENGINE_DEPTH", "14"))
         self.move_time = float(os.environ.get("ENGINE_MOVE_TIME", "0.6"))  # max sec/position
@@ -995,6 +1022,7 @@ def main():
         return
 
     cfg = Config()
+    check_telegram_settings(cfg)
     state = State(cfg.data_dir / "state.json")
     if args.probe:
         probe(cfg, state)
