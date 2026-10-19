@@ -73,7 +73,7 @@ export default {
       }
       const res = await check(env);
       const config = { user: !!env.CHESSCOM_USERNAME, repo: !!env.GITHUB_REPO, token: !!env.GITHUB_TOKEN };
-      return Response.json({ ok: true, config, latest_game: res });
+      return Response.json({ ok: true, version: "v3-window1200", window_seconds: WINDOW_SECONDS, config, latest_game: res });
     } catch (e) {
       return Response.json({ ok: false, error: String(e) }, { status: 500 });
     }
