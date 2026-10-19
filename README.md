@@ -38,7 +38,7 @@ GitHub's own schedule is slow (5–15 minutes). The free **Cloudflare Worker** i
 3. Triggers → Cron → `* * * * *`.
 
 ## Notes
-- Accuracy uses a formula close to chess.com's, so numbers are similar but not identical. Move marks: best = engine's top move, excellent < 2% winning-chance loss, good < 5%, inaccuracy ≥ 5%, mistake ≥ 10%, blunder ≥ 20%.
+- Accuracy uses a formula close to chess.com's, so numbers are similar but not identical. Move marks: brilliant = a near-best move that really sacrifices material in a position that is not already won, best = engine's top move, excellent < 2% winning-chance loss, good < 5%, inaccuracy ≥ 5%, mistake ≥ 10%, blunder ≥ 20%.
 - Piece art is the free *cburnett* set (the same style Lichess uses). Chess.com's own pieces and sounds are proprietary and are not copied; sounds are synthesised in the browser.
 - Review links hold the game data after the `#`, so nothing about your games is stored on a server. Very long games (about 55+ moves) don't fit into a Telegram button and come as an .html file instead.
 - Changing the review page: edit `viewer.py`, then run `python viewer.py --write-static docs/index.html` and commit.

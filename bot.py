@@ -408,7 +408,27 @@ def analyse_game(pgn_text, username, engine, limit, extra=None):
         for t in r["tags"]:
             tags[t] += 1
 
+    # Brilliant: a (near-)best move that really gives up material, in a position that is not already won,
+    # and the sacrifice is still on the board two plies later (so it is not just a trade).
+    def material(b, c):
+        return sum(VALUES.get(p.piece_type, 0) * (1 if p.color == c else -1) for p in b.piece_map().values())
+
+    brill = set()
+    for r in recs:
+        i = r["ply"]
+        if r["loss"] >= 2 or i + 2 >= len(boards):
+            continue
+        end = boards[min(i + 3, len(boards) - 1)]
+        mover = r["color"]
+        if win_pct(r["cp_before"]) >= 85 or win_pct(r["cp_after"]) < 45:
+            continue
+        if material(end, mover) - material(boards[i], mover) <= -3 and \
+                material(boards[i + 2], mover) - material(boards[i], mover) <= -3:
+            brill.add(i)
+    my_brilliants = [{"move_no": r["move_no"], "san": r["san"]} for r in mine if r["ply"] in brill]
+
     return {
+        "brilliants": my_brilliants,
         "url": extra.get("url") or h.get("Link", ""),
         "end_time": extra.get("end_time") or int(time.time()),
         "time_class": extra.get("time_class", ""),
@@ -435,7 +455,7 @@ def analyse_game(pgn_text, username, engine, limit, extra=None):
         "me": username,
         "start_cp": int(evals[0]["cp"]),
         "plies": [[r["uci"],
-                   "T" if r["best_is_best"] else {"blunder": "B", "mistake": "M", "inaccuracy": "I"}.get(
+                   "R" if r["ply"] in brill else "T" if r["best_is_best"] else {"blunder": "B", "mistake": "M", "inaccuracy": "I"}.get(
                        r["cls"], "X" if r["loss"] < 2 else "O"),
                    int(evals[r["ply"] + 1]["cp"]), r["best_uci"], "|".join(r["tags"])] for r in recs],
         "key_moments": [{
@@ -524,6 +544,8 @@ def game_positives(s):
         out.append("Fought back from a bad position")
     if s["outcome"] == "win" and s["accuracy"] >= s["opp_accuracy"] + 5:
         out.append("Outplayed the opponent")
+    for b in s.get("brilliants", [])[:2]:
+        out.append(f"✨ Brilliant move: {b['move_no']}. {b['san']}!!")
     if s["moves"] and s["best_moves"] / s["moves"] >= 0.5:
         out.append(f"{s['best_moves']}/{s['moves']} moves matched the engine's top choice")
     return out
@@ -563,12 +585,10 @@ def format_report(s):
         lines += ["", "⚠️ <b>Key moments</b>"]
         for k in s["key_moments"]:
             num = f"{k['move_no']}." if k["color"] == "w" else f"{k['move_no']}..."
-            extra = ""
-            if k["tags"]:
-                extra = " · " + ", ".join(k["tags"])
-            best = f", best was <b>{esc(k['best'])}</b>" if k["best"] else ""
-            lines.append(f"• {num} <b>{esc(k['san'])}</b> ({CLS_LABEL[k['cls']]}){best}{esc(extra)} "
-                         f"[{eval_str(k['before'])} → {eval_str(k['after'])}]")
+            mark = "??" if k["cls"] == "blunder" else "?"
+            why = f" {esc(', '.join(k['tags']))}." if k["tags"] else ""
+            best = f" Better: <b>{esc(k['best'])}</b>." if k["best"] else ""
+            lines.append(f"• {num} <b>{esc(k['san'])}{mark}</b>{why}{best} ({eval_str(k['before'])} → {eval_str(k['after'])})")
 
     adv = game_advice(s)
     if adv:
