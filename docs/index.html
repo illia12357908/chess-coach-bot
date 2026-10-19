@@ -60,7 +60,7 @@ h2{margin:0 0 8px;font-size:14px;color:var(--mut);text-transform:uppercase;lette
  </div>
  <div>
   <div class="card">
-   <div class="boardrow"><div id="evalbar"><div id="evalfill"></div></div><svg id="board" viewBox="0 0 800 800"></svg></div>
+   <div class="boardrow"><div id="evalbar"><div id="evalfill"></div></div><svg id="board" viewBox="-56 0 856 860"></svg></div>
    <div class="ctrl"><button id="bFirst" title="Start"></button><button id="bPrev" title="Back"></button><button id="bPlay" title="Play review (stops at key moments)"></button><button id="bNext" title="Forward"></button><button id="bLast" title="End"></button><button id="bFlip" title="Flip board"></button><button id="bSnd" title="Sound on/off"></button></div>
    <div id="info"></div><div id="momnav"><button id="mPrev">« Previous key moment</button><button id="mNext" class="go">Next key moment »</button></div>
   </div>
@@ -173,8 +173,8 @@ function renderBoard(){
   if(view>0){const u=P[view-1].u;for(const q of [u.slice(0,2),u.slice(2,4)]){const [f,r]=sq(q),[x,y]=xy(f,r);s+=`<rect x="${x}" y="${y}" width="100" height="100" fill="rgba(255,235,59,.5)"/>`}}
   for(let i=0;i<8;i++){
     const fl=flip?7-i:i,rk=flip?i:7-i;
-    s+=`<text x="${i*100+6}" y="${flip?18:792}" font-size="20" font-weight="700" fill="${(i+(flip?0:7))%2?'#739552':'#ebecd0'}">${String.fromCharCode(97+fl)}</text>`;
-    s+=`<text x="${flip?776:6}" y="${i*100+22}" font-size="20" font-weight="700" fill="${i%2?'#ebecd0':'#739552'}">${rk+1}</text>`;
+    s+=`<text x="${i*100+50}" y="842" text-anchor="middle" font-size="34" font-weight="700" fill="#c9c7c2">${String.fromCharCode(97+fl)}</text>`;
+    s+=`<text x="-28" y="${i*100+62}" text-anchor="middle" font-size="34" font-weight="700" fill="#c9c7c2">${rk+1}</text>`;
   }
   const Bd=boards[view];
   for(let i=0;i<8;i++)for(let f=0;f<8;f++){const ch=Bd[7-i][f];if(!ch)continue;
