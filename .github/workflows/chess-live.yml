@@ -32,7 +32,7 @@ jobs:
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       STOCKFISH_PATH: /usr/games/stockfish
-      TIMEZONE: Europe/Madrid
+      TIMEZONE: ${{ vars.TIMEZONE || 'Europe/Madrid' }}
       WEEKLY_DIGEST_DAY: sun
       WEEKLY_DIGEST_HOUR: "18"
       DATA_DIR: data

@@ -113,6 +113,14 @@ class State:
             except Exception:
                 log.exception("Could not read state, starting fresh")
 
+    def bind(self, username):
+        """State belongs to one chess.com user; a fork with someone else's history starts clean."""
+        owner = (username or "").lower()
+        if self.data.get("username") not in (None, "", owner):
+            log.info("State belongs to another user, starting fresh")
+            self.data = {"seen": {}, "games": {}, "tg_offset": 0, "last_digest": ""}
+        self.data["username"] = owner
+
     def save(self):
         games = self.data["games"]
         keep = set(sorted(games, key=lambda u: games[u].get("end_time", 0), reverse=True)[:60])
@@ -427,8 +435,9 @@ def analyse_game(pgn_text, username, engine, limit, extra=None):
         "me": username,
         "start_cp": int(evals[0]["cp"]),
         "plies": [[r["uci"],
-                   "T" if r["best_is_best"] else {"blunder": "B", "mistake": "M", "inaccuracy": "I"}.get(r["cls"], "O"),
-                   int(evals[r["ply"] + 1]["cp"]), r["best_uci"]] for r in recs],
+                   "T" if r["best_is_best"] else {"blunder": "B", "mistake": "M", "inaccuracy": "I"}.get(
+                       r["cls"], "X" if r["loss"] < 2 else "O"),
+                   int(evals[r["ply"] + 1]["cp"]), r["best_uci"], "|".join(r["tags"])] for r in recs],
         "key_moments": [{
             "move_no": r["move_no"], "color": "w" if r["color"] == chess.WHITE else "b",
             "san": r["san"], "cls": r["cls"], "best": r["best_san"], "tags": r["tags"],
@@ -1131,6 +1140,7 @@ def main():
     cfg = Config()
     check_telegram_settings(cfg)
     state = State(cfg.data_dir / "state.json")
+    state.bind(cfg.username)
     if args.probe:
         probe(cfg, state)
         return

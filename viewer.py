@@ -5,6 +5,7 @@ import json
 import zlib
 
 import chess
+import chess.svg
 
 TEMPLATE = r"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -49,7 +50,12 @@ h2{margin:0 0 8px;font-size:14px;color:var(--mut);text-transform:uppercase;lette
 #moves .mv.on{background:#4b6b2c;color:#fff}
 .bd{margin-left:3px;font-weight:700}
 .tips{color:var(--mut);font-size:12px;margin-top:8px}
+#info .why{margin:6px 0 2px;line-height:1.45}
+#momnav{display:flex;gap:6px;margin-top:8px}
+#momnav button{flex:1;background:var(--panel2);color:var(--tx);border:0;border-radius:8px;padding:9px 6px;font-size:14px;cursor:pointer}
+#momnav button.go{background:var(--acc);color:#10200a;font-weight:700}
 </style></head><body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>__PIECES__</defs></svg>
 <div class="wrap">
  <div class="card head">
   <h1 id="title"></h1><div class="sub" id="sub"></div>
@@ -59,8 +65,8 @@ h2{margin:0 0 8px;font-size:14px;color:var(--mut);text-transform:uppercase;lette
  <div>
   <div class="card">
    <div class="boardrow"><div id="evalbar"><div id="evalfill"></div></div><svg id="board" viewBox="0 0 800 800"></svg></div>
-   <div class="ctrl"><button id="bFirst" title="Start">⏮</button><button id="bPrev" title="Back">‹</button><button id="bPlay" title="Autoplay">▶</button><button id="bNext" title="Forward">›</button><button id="bLast" title="End">⏭</button><button id="bFlip" title="Flip board">⇅</button></div>
-   <div id="info"></div>
+   <div class="ctrl"><button id="bFirst" title="Start">⏮</button><button id="bPrev" title="Back">‹</button><button id="bPlay" title="Autoplay">▶</button><button id="bNext" title="Forward">›</button><button id="bLast" title="End">⏭</button><button id="bFlip" title="Flip board">⇅</button><button id="bSnd" title="Sound on/off">🔊</button></div>
+   <div id="info"></div><div id="momnav"><button id="mPrev">« Previous key moment</button><button id="mNext" class="go">Next key moment »</button></div>
   </div>
  </div>
  <div>
@@ -85,11 +91,11 @@ async function loadData(){
 }
 function boot(D){
 const M=D.meta;
-const P=D.plies.map(p=>({u:p[0],s:p[1],c:p[2],cp:p[3],b:p[4],bs:p[5]})),N=P.length;
-const COL={B:'#e5483f',M:'#f0892b',I:'#f2c230',T:'#7fb34a',O:'#9aa0a6'};
-const SYM={B:'??',M:'?',I:'?!',T:'✓'};
-const NAME={B:'Blunder',M:'Mistake',I:'Inaccuracy',T:'Best move',O:'Good move'};
-const GL={K:'♚',Q:'♛',R:'♜',B:'♝',N:'♞',P:'♟'};
+const P=D.plies.map(p=>({u:p[0],s:p[1],c:p[2],cp:p[3],b:p[4],t:p[5]||''})),N=P.length;
+const COL={B:'#e5483f',M:'#f0892b',I:'#f2c230',T:'#8dbb3f',X:'#6aa84f',O:'#a3a98c'};
+const SYM={B:'??',M:'?',I:'?!',T:'★',X:'✓',O:'✓'};
+const NAME={B:'Blunder',M:'Mistake',I:'Inaccuracy',T:'Best move',X:'Excellent',O:'Good'};
+const PN={K:'king',Q:'queen',R:'rook',B:'bishop',N:'knight',P:'pawn'};
 let idx=0,flip=M.me==='black',alt=false,timer=null;
 const wp=cp=>{cp=Math.max(-1000,Math.min(1000,cp));return 50+50*(2/(1+Math.exp(-0.00368208*cp))-1)};
 const fmt=cp=>Math.abs(cp)>=9000?(cp>0?'+M':'-M'):((cp>0?'+':'')+(cp/100).toFixed(1));
@@ -107,9 +113,27 @@ function applyUci(b,u){
   if(p&&p.toLowerCase()==='k'&&Math.abs(f2-f1)===2){const rf=f2>f1?7:0,rt=f2>f1?5:3;b[r1][rt]=b[r1][rf];b[r1][rf]=null}
   if(u.length>4)p=p===p.toUpperCase()?u[4].toUpperCase():u[4].toLowerCase();
   b[r2][f2]=p;b[r1][f1]=null}
+function reach(b,t,f,r,f2,r2){const df=f2-f,dr=r2-r;
+  if(t==='N')return Math.abs(df*dr)===2;
+  if(t==='K')return Math.max(Math.abs(df),Math.abs(dr))===1;
+  const dg=Math.abs(df)===Math.abs(dr),st=df===0||dr===0;
+  if((t==='B'&&!dg)||(t==='R'&&!st)||(t==='Q'&&!dg&&!st))return false;
+  const sf=Math.sign(df),sr=Math.sign(dr);let x=f+sf,y=r+sr;
+  while(x!==f2||y!==r2){if(b[y][x])return false;x+=sf;y+=sr}return true}
+function sanOf(b,u){
+  const [f1,r1]=sq(u.slice(0,2)),[f2,r2]=sq(u.slice(2,4)),pc=b[r1][f1];if(!pc)return u;
+  const t=pc.toUpperCase(),dst=u.slice(2,4);
+  if(t==='K'&&Math.abs(f2-f1)===2)return f2>f1?'O-O':'O-O-O';
+  const cap=b[r2][f2]||(t==='P'&&f1!==f2);
+  if(t==='P'){let x=(cap?String.fromCharCode(97+f1)+'x':'')+dst;if(u.length>4)x+='='+u[4].toUpperCase();return x}
+  const same=[];
+  for(let r=0;r<8;r++)for(let f=0;f<8;f++)if((f!==f1||r!==r1)&&b[r][f]===pc&&reach(b,t,f,r,f2,r2))same.push([f,r]);
+  let dis='';
+  if(same.length){const sf=same.some(a=>a[0]===f1),sr=same.some(a=>a[1]===r1);dis=!sf?String.fromCharCode(97+f1):(!sr?String(r1+1):String.fromCharCode(97+f1)+(r1+1))}
+  return t+dis+(cap?'x':'')+dst}
 const boards=[startBoard()];
 for(const p of P){const nb=boards[boards.length-1].map(r=>r.slice());applyUci(nb,p.u);boards.push(nb)}
-window.__fen=i=>{let s=[];for(let r=7;r>=0;r--){let row='',e=0;for(let f=0;f<8;f++){const c=boards[i][r][f];if(!c)e++;else{if(e){row+=e;e=0}row+=c}}if(e)row+=e;s.push(row)}return s.join('/')};
+window.__san=i=>sanOf(boards[i],P[i].u);window.__fen=i=>{let s=[];for(let r=7;r>=0;r--){let row='',e=0;for(let f=0;f<8;f++){const c=boards[i][r][f];if(!c)e++;else{if(e){row+=e;e=0}row+=c}}if(e)row+=e;s.push(row)}return s.join('/')};
 function arrow(u,color){
   const [f1,r1]=sq(u.slice(0,2)),[f2,r2]=sq(u.slice(2,4));
   const a=xy(f1,r1).map(v=>v+50),b=xy(f2,r2).map(v=>v+50);
@@ -118,6 +142,25 @@ function arrow(u,color){
   return `<line x1="${a[0]+ux*8}" y1="${a[1]+uy*8}" x2="${hx}" y2="${hy}" stroke="${color}" stroke-width="18" stroke-linecap="round" opacity=".85"/>`+
    `<polygon points="${b[0]-ux*4},${b[1]-uy*4} ${hx-uy*30},${hy+ux*30} ${hx+uy*30},${hy-ux*30}" fill="${color}" opacity=".9"/>`;
 }
+// ---- sound (synthesised, no files) ----
+let AC=null,muted=false;try{muted=localStorage.getItem('chessMute')==='1'}catch(e){}
+function tone(f,t0,dur,vol,type){const c=AC,o=c.createOscillator(),g=c.createGain();o.type=type||'sine';o.frequency.value=f;
+  g.gain.setValueAtTime(0.0001,c.currentTime+t0);g.gain.exponentialRampToValueAtTime(vol,c.currentTime+t0+0.005);
+  g.gain.exponentialRampToValueAtTime(0.0001,c.currentTime+t0+dur);o.connect(g).connect(c.destination);o.start(c.currentTime+t0);o.stop(c.currentTime+t0+dur+0.02)}
+function click(t0,vol,freq){const c=AC,n=Math.floor(c.sampleRate*0.05),buf=c.createBuffer(1,n,c.sampleRate),d=buf.getChannelData(0);
+  for(let i=0;i<n;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/n,3);
+  const s=c.createBufferSource();s.buffer=buf;const f=c.createBiquadFilter();f.type='bandpass';f.frequency.value=freq;f.Q.value=1.2;
+  const g=c.createGain();g.gain.value=vol;s.connect(f).connect(g).connect(c.destination);s.start(c.currentTime+t0)}
+function snd(kind){if(muted)return;try{AC=AC||new(window.AudioContext||window.webkitAudioContext)();if(AC.state==='suspended')AC.resume();
+  if(kind==='move'){click(0,1.6,900);tone(180,0,0.06,0.25)}
+  else if(kind==='capture'){click(0,2.4,700);tone(130,0,0.09,0.4);click(0.03,1.2,1500)}
+  else if(kind==='castle'){click(0,1.6,900);click(0.11,1.8,800);tone(170,0.11,0.06,0.25)}
+  else if(kind==='check'){click(0,2,800);tone(660,0.02,0.18,0.18,'triangle')}
+  else if(kind==='end'){tone(523,0,0.25,0.2,'triangle');tone(392,0.18,0.35,0.2,'triangle')}
+  }catch(e){}}
+function soundFor(i){if(i<=0)return;const p=P[i-1];
+  if(i===N)snd('end');else if(/[+#]$/.test(p.s))snd('check');else if(/^O-O/.test(p.s))snd('castle');else if(p.s.includes('x'))snd('capture');else snd('move')}
+function syncSnd(){$('bSnd').textContent=muted?'🔇':'🔊'}
 function renderBoard(){
   const view=(alt&&idx>0)?idx-1:idx;let s='';
   for(let f=0;f<8;f++)for(let r=0;r<8;r++){const [x,y]=xy(f,r);s+=`<rect x="${x}" y="${y}" width="100" height="100" fill="${(f+r)%2?'#ebecd0':'#739552'}"/>`}
@@ -129,20 +172,51 @@ function renderBoard(){
   }
   const Bd=boards[view];
   for(let i=0;i<8;i++)for(let f=0;f<8;f++){const ch=Bd[7-i][f];if(!ch)continue;
-    const [x,y]=xy(f,7-i),w=ch===ch.toUpperCase(),g=GL[ch.toUpperCase()]+'︎';
-    s+=`<text x="${x+50}" y="${y+80}" text-anchor="middle" font-size="88" font-family="'Segoe UI Symbol','Apple Symbols','DejaVu Sans','Noto Sans Symbols 2',serif" fill="${w?'#fff':'#1b1b1b'}" stroke="${w?'#222':'#e9e9e9'}" stroke-width="${w?3.5:1.2}" paint-order="stroke">${g}</text>`}
+    const [x,y]=xy(f,7-i),w=ch===ch.toUpperCase();
+    s+=`<use href="#${w?'white':'black'}-${PN[ch.toUpperCase()]}" transform="translate(${x},${y}) scale(2.2222)"/>`}
   if(alt&&idx>0){const p=P[idx-1];if(p.b&&p.b!==p.u)s+=arrow(p.b,'#7fb34a');s+=arrow(p.u,'#e5483f')}
-  if(!alt&&idx>0){const p=P[idx-1];if(SYM[p.c]&&p.c!=='T'){const [f,r]=sq(p.u.slice(2,4)),[x,y]=xy(f,r);
-    s+=`<circle cx="${x+84}" cy="${y+16}" r="19" fill="${COL[p.c]}" stroke="#fff" stroke-width="2.5"/><text x="${x+84}" y="${y+24}" text-anchor="middle" font-size="22" font-weight="800" fill="#fff">${SYM[p.c]}</text>`}}
+  if(!alt&&idx>0){const p=P[idx-1];if(SYM[p.c]){const [f,r]=sq(p.u.slice(2,4)),[x,y]=xy(f,r);
+    s+=`<circle cx="${x+84}" cy="${y+16}" r="19" fill="${COL[p.c]}" stroke="#fff" stroke-width="2.5"/><text x="${x+84}" y="${y+24}" text-anchor="middle" font-size="${SYM[p.c].length>1?19:22}" font-weight="800" fill="#fff">${SYM[p.c]}</text>`}}
   $('board').innerHTML=s;
   const pct=wp(cpAt(view));const fill=$('evalfill');
   fill.style.height=pct+'%';fill.style[flip?'top':'bottom']='0';fill.style[flip?'bottom':'top']='auto';
 }
+const mineSide=M.me==='white'?0:1;
+const moments=[];for(let k=0;k<N;k++)if(P[k].c==='B'||P[k].c==='M')moments.push(k+1);
+function nextMoment(d){let t=null;
+  if(d>0){t=moments.find(m=>m>idx)}else{for(const m of moments)if(m<idx)t=m}
+  if(t===null||t===undefined){$('info').insertAdjacentHTML('beforeend','<div class="why" style="color:var(--mut)">No more key moments in that direction.</div>');return}
+  go(t)}
+function pctFor(k,cp){const w=wp(cp);return Math.round(k%2===0?w:100-w)}
+function explain(k){
+  const p=P[k],mine=(k%2===mineSide),before=pctFor(k,cpAt(k)),after=pctFor(k,p.cp);
+  const bestSan=(p.b&&p.b!==p.u)?sanOf(boards[k],p.b):'';
+  const who=mine?'You':'Your opponent',whose=mine?'your':'their';
+  let t='';
+  if(p.c==='T')t=mine?'This is the engine’s top choice. Well found.':'Your opponent found the best move here.';
+  else if(p.c==='X')t=(mine?'You':'They')+' played an excellent move, almost as good as the very best.';
+  else if(p.c==='O')t=(mine?'A good, solid move.':'A solid move by your opponent.')+(bestSan?` The engine slightly preferred ${bestSan}.`:'');
+  else{
+    const nm={I:'an inaccuracy',M:'a mistake',B:'a blunder'}[p.c];
+    t=`${who} played ${nm}. ${mine?'Your':'Their'} winning chances dropped from about ${before}% to ${after}%.`;
+    if(bestSan)t+=` ${mine?'The better move was':'They should have played'} <b>${esc(bestSan)}</b>.`;
+    if(mine){
+      for(const g of p.t.split('|').filter(Boolean)){
+        if(g==='missed mate')t+=' You had a forced checkmate available and missed it.';
+        else if(g==='allowed mate')t+=' This move allows your opponent a forced checkmate.';
+        else if(g==='missed material')t+=' A move that wins material was on the board.';
+        else if(g==='missed tactic')t+=' A forcing move (a capture or a check) was stronger here. Before quiet moves, scan checks, captures and threats.';
+        else if(g.startsWith('hung '))t+=` It leaves your ${g.slice(5)} to be captured.`;
+      }
+    }else if(k+1<N&&P[k+1]&&(P[k+1].c==='T'||P[k+1].c==='X'))t+=' You took advantage of it.';
+    else if(k+1<N&&P[k+1])t+=' This was a chance to gain an advantage.';
+  }
+  return t}
 function renderInfo(){
-  if(idx===0){$('info').innerHTML=`<div class="mvtitle">Start of the game</div><div class="evals">Use ▶ or the arrow keys to step through, or tap a key moment.</div>`;return}
+  if(idx===0){$('info').innerHTML=`<div class="mvtitle">Start of the game</div><div class="why" style="color:var(--mut)">Press <b>Next key moment</b> for a guided tour of the turning points, or step through with ▶ and the arrow keys.</div>`;return}
   const p=P[idx-1],k=idx-1,no=Math.floor(k/2)+1,lbl=no+(k%2===0?'. ':'... ')+p.s;
-  let h=`<div class="mvtitle"><span class="dot" style="background:${COL[p.c]}"></span>${esc(lbl)} — ${NAME[p.c]}</div><div class="evals">Evaluation ${fmt(cpAt(idx-1))} → ${fmt(p.cp)}</div>`;
-  if(p.b&&p.b!==p.u&&'BMI'.includes(p.c))h+=`<div>Better was <b>${esc(p.bs)}</b><button id="bestbtn">${alt?'Back to game':'Show better move'}</button></div>`;
+  let h=`<div class="mvtitle"><span class="dot" style="background:${COL[p.c]}"></span>${esc(lbl)} — ${NAME[p.c]}</div><div class="evals">Evaluation ${fmt(cpAt(idx-1))} → ${fmt(p.cp)}</div><div class="why">${explain(k)}</div>`;
+  if(p.b&&p.b!==p.u&&'BMI'.includes(p.c))h+=`<div style="margin-top:6px"><button id="bestbtn" style="margin-left:0">${alt?'Back to game':'Show the better move'}</button></div>`;
   $('info').innerHTML=h;const b=$('bestbtn');if(b)b.onclick=()=>{alt=!alt;render()};
 }
 function renderGraph(){
@@ -158,7 +232,7 @@ function buildMoves(){
   let h='';for(let k=0;k<N;k+=2){
     h+=`<div class="n">${k/2+1}.</div>`;
     for(const j of [k,k+1]){if(j>=N){h+='<div></div>';continue}
-      const p=P[j],b=SYM[p.c]&&p.c!=='T'?`<span class="bd" style="color:${COL[p.c]}">${SYM[p.c]}</span>`:'';
+      const p=P[j],b=SYM[p.c]&&p.c!=='O'&&p.c!=='X'?`<span class="bd" style="color:${COL[p.c]}">${SYM[p.c]}</span>`:'';
       h+=`<div class="mv" data-i="${j+1}">${esc(p.s)}${b}</div>`}}
   $('moves').innerHTML=h;
   $('moves').onclick=e=>{const t=e.target.closest('.mv');if(t){go(+t.dataset.i)}};
@@ -168,7 +242,7 @@ function renderMoves(){
   const on=document.querySelector('#moves .mv.on');if(on){const c=$('moves');const t=on.offsetTop-c.offsetTop-c.clientHeight/2+on.clientHeight;c.scrollTo({top:t,behavior:'smooth'})}
 }
 function render(){renderBoard();renderInfo();renderGraph();renderMoves()}
-function go(i){idx=Math.max(0,Math.min(N,i));alt=false;render()}
+function go(i,quiet){const prev=idx;idx=Math.max(0,Math.min(N,i));alt=false;render();if(!quiet&&Math.abs(idx-prev)===1)soundFor(idx);else if(!quiet&&idx!==prev&&idx>0)snd('move')}
 function step(d){go(idx+d)}
 function play(){if(timer){clearInterval(timer);timer=null;$('bPlay').textContent='▶';return}
   if(idx>=N)idx=0;$('bPlay').textContent='⏸';timer=setInterval(()=>{if(idx>=N){play();return}step(1)},900)}
@@ -187,7 +261,7 @@ function init(){
   buildMoves();render();
 }
 $('bFirst').onclick=()=>go(0);$('bLast').onclick=()=>go(N);$('bPrev').onclick=()=>step(-1);$('bNext').onclick=()=>step(1);
-$('bPlay').onclick=play;$('bFlip').onclick=()=>{flip=!flip;render()};
+$('bPlay').onclick=play;$('bSnd').onclick=()=>{muted=!muted;try{localStorage.setItem('chessMute',muted?'1':'0')}catch(e){}syncSnd();if(!muted)snd('move')};syncSnd();$('mNext').onclick=()=>nextMoment(1);$('mPrev').onclick=()=>nextMoment(-1);$('bFlip').onclick=()=>{flip=!flip;render()};
 document.addEventListener('keydown',e=>{
   if(e.key==='ArrowLeft'){step(-1);e.preventDefault()}else if(e.key==='ArrowRight'){step(1);e.preventDefault()}
   else if(e.key==='Home')go(0);else if(e.key==='End')go(N);else if(e.key==='f'||e.key==='F'){flip=!flip;render()}});
@@ -206,22 +280,26 @@ loadData().then(boot).catch(fail);
 """
 
 
+def _pieces_svg():
+    """Piece artwork: the classic 'cburnett' set shipped inside python-chess (credit: Colin M.L. Burnett)."""
+    return "".join(chess.svg.PIECES.values())
+
+
 def _game_data(s, username=""):
     """Compact game data shared by the embedded and the link versions."""
     me = username or s.get("me", "you")
     board = chess.Board()
     plies = []
-    for u, cls, cp, best in s["plies"]:
+    for p in s["plies"]:
+        u, cls, cp, best = p[0], p[1], p[2], p[3]
+        tags = p[4] if len(p) > 4 else ""
         mv = chess.Move.from_uci(u)
         san = board.san(mv)
-        best_san = ""
-        if best and best != u:
-            try:
-                best_san = board.san(chess.Move.from_uci(best))
-            except Exception:
-                best_san = ""
         board.push(mv)
-        plies.append([u, san, cls, cp, best if best != u else "", best_san])
+        row = [u, san, cls, cp, best if best != u else "", tags]
+        while row and row[-1] == "":
+            row.pop()
+        plies.append(row)
     white_me = s["color"] == "white"
     meta = {
         "me": s["color"],
@@ -243,12 +321,12 @@ def build_viewer(s, username=""):
     payload = json.dumps(data, separators=(",", ":"), ensure_ascii=False).replace("</", "<\\/")
     meta = data["meta"]
     title = _html.escape(f"{meta['white']} vs {meta['black']}")
-    return TEMPLATE.replace("__TITLE__", title).replace("__DATA__", payload)
+    return TEMPLATE.replace("__TITLE__", title).replace("__PIECES__", _pieces_svg()).replace("__DATA__", payload)
 
 
 def build_static_page():
     """The page that lives on GitHub Pages; the game itself comes in the URL after the #."""
-    return TEMPLATE.replace("__TITLE__", "Chess review").replace("__DATA__", "")
+    return TEMPLATE.replace("__TITLE__", "Chess review").replace("__PIECES__", _pieces_svg()).replace("__DATA__", "")
 
 
 def review_url(base_url, s, username=""):

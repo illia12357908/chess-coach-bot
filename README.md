@@ -1,75 +1,47 @@
-# Chess.com → Telegram: разбор партий
+# Chess Coach Bot
 
-Бот сам находит твои новые партии на chess.com, разбирает их Stockfish'ом и присылает в Telegram:
-результат, точность, грубые ошибки, ключевые моменты (с лучшим ходом), что получилось хорошо
-и какую теорию учить. По воскресеньям приходит недельная сводка.
+Free, fully automatic chess.com → Telegram coach. A few seconds after you finish a game you get:
 
-**Токены Claude не тратятся.** Анализ делает Stockfish прямо на GitHub. Ключ Anthropic нужен только
-если хочешь короткую "заметку тренера" в недельной сводке (необязательно).
+- a **report** in Telegram: result, accuracy, blunders / mistakes / inaccuracies, key moments, what went well, what theory to study
+- an **interactive review** (button under the report): board, move list, evaluation graph, move quality marks
+  (best ★ / excellent / good / inaccuracy / mistake / blunder), better-move arrows, sound, and a
+  *Next key moment* tour with a text explanation of each turning point
+- **weekly digest** and menu buttons (latest game, pick from last 50, week, month)
+- optional AI coach note in the digest (Anthropic API key, about 1.5 US cents per digest)
 
-## Как это работает
-- **Автоматически:** каждые ~20 минут GitHub проверяет chess.com. Если есть новая партия, разбор приходит сам.
-  Если новых партий нет, проверка занимает несколько секунд и почти не расходует бесплатные минуты GitHub.
-- **Кнопки в Telegram:** напиши боту `/menu`. Появятся кнопки: последняя партия, список последних 50 партий
-  (выбираешь любую, она разбирается), неделя, месяц, проверить новые.
-  Нажатие обрабатывается при ближайшей проверке (до ~20 минут).
-- **Мгновенный режим:** сразу после партии открой GitHub → Actions → "Chess report bot" → **Run workflow**
-  (можно из приложения GitHub на телефоне). Бот проработает 10 минут онлайн, и кнопки будут отвечать сразу.
+Everything runs on **GitHub Actions** (free for public repos) with Stockfish. Nothing to host, nothing running on your phone.
+Русская инструкция: [README.ru.md](README.ru.md)
 
-## Установка (один раз, ~10 минут)
+## Set it up (about 10 minutes, once)
 
-### 1. Telegram-бот
-1. В Telegram открой **@BotFather**, отправь `/newbot`, скопируй токен.
-2. Открой своего нового бота и нажми **Start**.
-3. Chat id: открой в браузере `https://api.telegram.org/bot<ТВОЙ_ТОКЕН>/getUpdates`
-   и найди `"chat":{"id":123456789` (это число и есть chat id). Если пусто, отправь боту любое сообщение и обнови страницу.
+1. **Fork** this repository (button at the top right). Keep it public: Actions minutes are unlimited for public repos.
+2. **Telegram bot:** in Telegram open **@BotFather** → `/newbot` → copy the token (looks like `123456789:AAH...`, copy all of it, digits included).
+   Open your new bot and press **Start**. Then open `https://api.telegram.org/bot<TOKEN>/getUpdates` in a browser
+   (replace `<TOKEN>`, no `<>`) and copy the number after `"chat":{"id":` — that is your chat id.
+3. In your fork: **Settings → Secrets and variables → Actions → New repository secret**, add:
+   - `CHESSCOM_USERNAME` — your chess.com name
+   - `TELEGRAM_BOT_TOKEN` — the token from BotFather
+   - `TELEGRAM_CHAT_ID` — the number from step 2
+   - `ANTHROPIC_API_KEY` — optional (AI note in the weekly digest)
+   - optional *variable* (Variables tab) `TIMEZONE`, for example `Europe/Berlin` (default `Europe/Madrid`)
+4. **Settings → Actions → General → Workflow permissions → Read and write permissions → Save.**
+5. **Actions** tab → enable workflows, open **Chess report bot** → **Run workflow**. The Telegram menu and your last 3 games arrive.
+6. **Settings → Pages → Deploy from a branch → `main` → `/docs` → Save.** This makes the interactive review open as a link.
+   (Without it the bot still works and sends the review as an .html file, which you must open in Chrome/Safari.)
 
-### 2. Репозиторий на GitHub
-1. Создай **приватный** репозиторий (в нём хранится история твоих партий).
-2. Загрузи в корень: `bot.py` и `requirements.txt` (**Add file → Upload files**).
-3. Создай файл `.github/workflows/chess-bot.yml`: **Add file → Create new file**, в поле имени напиши
-   `.github/workflows/chess-bot.yml` (папки создадутся сами), вставь содержимое файла `chess-bot.yml`, нажми Commit.
+Done. The bot checks chess.com every ~5 minutes. After a game it starts a live session that checks every 30 seconds and shuts itself off after 25 idle minutes.
 
-### 3. Секреты
-**Settings → Secrets and variables → Actions → New repository secret**:
-- `CHESSCOM_USERNAME` — твой ник на chess.com
-- `TELEGRAM_BOT_TOKEN` — токен от BotFather
-- `TELEGRAM_CHAT_ID` — твой chat id
-- `ANTHROPIC_API_KEY` — необязательно
+## Instant reports (optional, recommended)
+GitHub's own schedule is slow (5–15 minutes). The free **Cloudflare Worker** in `cloudflare/worker.js` checks chess.com every minute and starts the bot as soon as a game ends.
+1. Cloudflare dashboard → Workers → Create → paste `cloudflare/worker.js`.
+2. Variables: `CHESSCOM_USERNAME`, `GITHUB_REPO` (`yourname/chess-coach-bot`), secret `GITHUB_TOKEN` (fine-grained token, only *Actions: Read and write* on this repo).
+3. Triggers → Cron → `* * * * *`.
 
-### 4. Права на запись
-**Settings → Actions → General → Workflow permissions → Read and write permissions → Save.**
+## Notes
+- Accuracy uses a formula close to chess.com's, so numbers are similar but not identical. Move marks: best = engine's top move, excellent < 2% winning-chance loss, good < 5%, inaccuracy ≥ 5%, mistake ≥ 10%, blunder ≥ 20%.
+- Piece art is the free *cburnett* set (the same style Lichess uses). Chess.com's own pieces and sounds are proprietary and are not copied; sounds are synthesised in the browser.
+- Review links hold the game data after the `#`, so nothing about your games is stored on a server. Very long games (about 55+ moves) don't fit into a Telegram button and come as an .html file instead.
+- Changing the review page: edit `viewer.py`, then run `python viewer.py --write-static docs/index.html` and commit.
+- Run locally: `pip install -r requirements.txt`, install Stockfish, copy `.env.example` to `.env`, `python bot.py`.
 
-### 5. Запуск
-Вкладка **Actions** → "Chess report bot" → **Run workflow**. В Telegram придёт меню с кнопками,
-а затем разбор последних 3 партий. Дальше всё работает само.
-
-## Настройки (в `chess-bot.yml`)
-- `TIMEZONE` — твой часовой пояс для недельной сводки
-- `WEEKLY_DIGEST_DAY` — `sun`, `mon`, … или `off`
-- Частота проверки: строка `cron`. Для приватного репозитория бесплатно 2000 минут в месяц; текущий режим укладывается.
-
-## Заметки
-- GitHub может задерживать запуски по расписанию на несколько минут.
-- Если репозиторий 60 дней без активности, GitHub отключает расписание. Бот сам коммитит состояние, так что обычно проблем нет.
-- Точность считается по формуле, похожей на chess.com, поэтому цифры близкие, но не идентичные.
-- Локальный запуск: `pip install -r requirements.txt`, установить Stockfish, затем `python bot.py` (постоянно)
-  или `python bot.py --once --listen 10`.
-
-## Как приходят разборы
-- **Автоматически, без кнопок.** Раз в ~5 минут GitHub проверяет chess.com. Нашлась новая партия: разбор приходит, и сразу запускается живая сессия.
-  В живой сессии бот опрашивает chess.com каждые 30 секунд, и каждая следующая партия приходит через ~1 минуту. Если 25 минут партий нет, сессия сама выключается (до 5,5 часов подряд).
-  Первая партия после паузы приходит с задержкой до ~5–15 минут (GitHub не гарантирует точность расписания), остальные почти сразу.
-- **Для каждой партии два сообщения:** текстовый отчёт и файл `review_….html`. Файл открой в браузере (на телефоне: нажми на файл → «Открыть в Safari/Chrome» или «Поделиться»).
-  В нём доска с кнопками ‹ ›, график оценки (нажимай и води пальцем), список ходов с пометками ?? ? ?!, кнопка «Show better move» со стрелками (красная: твой ход, зелёная: лучший) и переход к твоим ключевым ошибкам.
-- **Вручную:** Actions → Chess live mode → Run workflow, если нужна сессия сразу.
-- **Кнопки в Telegram:** `/menu`: последняя партия, 50 последних партий, неделя, месяц.
-
-## Минуты GitHub
-Проверка раз в 5 минут расходует минуты Actions. **В публичном репозитории они бесплатны без ограничений**, а в приватном лишь 2000 в месяц.
-Поэтому для автоматического режима репозиторий лучше сделать публичным (Settings → General → Danger zone → Change visibility). Токены и ключи остаются в Secrets и не видны.
-Видна будет только история разобранных партий (они и так публичны на chess.com).
-Если оставляешь репозиторий приватным: в `chess-bot.yml` поставь `*/20` вместо `*/5` и запускай живую сессию вручную.
-
-## Совсем мгновенно, всегда
-Для разбора через секунды в любое время нужен постоянно работающий компьютер или сервер (`python bot.py` с `POLL_MINUTES=0.5`). На GitHub такого режима нет.
+License: MIT (see LICENSE for third-party notes).
