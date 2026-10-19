@@ -1,0 +1,57 @@
+name: Chess live mode
+
+# Start this before you play. For the chosen number of minutes the bot checks chess.com
+# every ~30 seconds and sends the analysis of each finished game to Telegram.
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "How long to stay live (max 330)"
+        default: "180"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: chess-bot              # same group as the scheduled workflow, so they never run at the same time
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 345
+    env:
+      CHESSCOM_USERNAME: ${{ secrets.CHESSCOM_USERNAME }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      STOCKFISH_PATH: /usr/games/stockfish
+      TIMEZONE: Europe/Madrid
+      WEEKLY_DIGEST_DAY: sun
+      WEEKLY_DIGEST_HOUR: "18"
+      DATA_DIR: data
+      WATCH_POLL_SECONDS: "30"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Stockfish and dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq stockfish
+          pip install -r requirements.txt
+
+      - name: Live mode
+        run: python bot.py --watch ${{ github.event.inputs.minutes || '180' }}
+
+      - name: Save state
+        if: always()
+        run: |
+          git config user.name "chess-bot"
+          git config user.email "chess-bot@users.noreply.github.com"
+          git add data/state.json || true
+          git diff --cached --quiet || (git commit -m "Update state" && git pull --rebase -q && git push)

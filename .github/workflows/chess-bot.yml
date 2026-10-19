@@ -1,0 +1,65 @@
+name: Chess report bot
+
+on:
+  schedule:
+    - cron: "*/20 6-22 * * *"   # every 20 min, 06:00-22:59 UTC
+  workflow_dispatch:             # manual start from the Actions tab / GitHub mobile app
+    inputs:
+      listen_minutes:
+        description: "Stay online N minutes so Telegram buttons answer instantly (0 = just one check)"
+        default: "10"
+
+permissions:
+  contents: write                # needed to save data/state.json back to the repo
+
+concurrency:
+  group: chess-bot
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CHESSCOM_USERNAME: ${{ secrets.CHESSCOM_USERNAME }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      STOCKFISH_PATH: /usr/games/stockfish
+      TIMEZONE: Europe/Madrid
+      WEEKLY_DIGEST_DAY: sun
+      WEEKLY_DIGEST_HOUR: "18"
+      DATA_DIR: data
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # Cheap check (a few seconds, no Stockfish): anything new to do?
+      - name: Anything to do?
+        id: probe
+        run: python bot.py --probe
+
+      - name: Install Stockfish
+        if: steps.probe.outputs.work == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq stockfish
+
+      - name: Analyse games and answer Telegram buttons
+        if: steps.probe.outputs.work == 'true' || github.event_name == 'workflow_dispatch'
+        run: python bot.py --once --listen ${{ github.event.inputs.listen_minutes || '0' }}
+
+      - name: Save state
+        if: always()
+        run: |
+          git config user.name "chess-bot"
+          git config user.email "chess-bot@users.noreply.github.com"
+          git add data/state.json || true
+          git diff --cached --quiet || (git commit -m "Update state" && git pull --rebase -q && git push)
