@@ -6,8 +6,14 @@ on:
   workflow_dispatch:
     inputs:
       minutes:
-        description: "How long to stay live (max 330)"
+        description: "Longest time to stay live (max 330)"
         default: "180"
+      idle:
+        description: "Stop after this many minutes without a new game (0 = never)"
+        default: "0"
+      quiet:
+        description: "true = no start/stop messages in Telegram"
+        default: "false"
 
 permissions:
   contents: write
@@ -46,7 +52,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Live mode
-        run: python bot.py --watch ${{ github.event.inputs.minutes || '180' }}
+        run: python bot.py --watch ${{ github.event.inputs.minutes || '180' }} --idle ${{ github.event.inputs.idle || '0' }} ${{ github.event.inputs.quiet == 'true' && '--quiet' || '' }}
 
       - name: Save state
         if: always()

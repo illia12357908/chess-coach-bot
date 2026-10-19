@@ -32,6 +32,11 @@ import chess.pgn
 import requests
 
 try:
+    from viewer import build_viewer
+except Exception:  # viewer is optional
+    build_viewer = None
+
+try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
@@ -108,8 +113,13 @@ class State:
                 log.exception("Could not read state, starting fresh")
 
     def save(self):
+        games = self.data["games"]
+        keep = set(sorted(games, key=lambda u: games[u].get("end_time", 0), reverse=True)[:60])
+        for u in games:
+            if u not in keep:
+                games[u].pop("plies", None)
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self.data, indent=1))
+        tmp.write_text(json.dumps(self.data, separators=(",", ":")))
         tmp.replace(self.path)
 
 
@@ -313,6 +323,8 @@ def analyse_game(pgn_text, username, engine, limit, extra=None):
             "best_san": b.san(best) if best and best != node.move else None,
             "best_is_best": best == node.move,
         }
+        r["uci"] = node.move.uci()
+        r["best_uci"] = best.uci() if best else ""
         clk = node.clock()
         r["time_pressure"] = bool(base and clk is not None and clk <= max(10, 0.1 * base))
 
@@ -411,6 +423,11 @@ def analyse_game(pgn_text, username, engine, limit, extra=None):
         "endgame_errors": eg_types,
         "time_trouble_errors": sum(1 for r in mine if r["cls"] in ("mistake", "blunder") and r["time_pressure"]),
         "tags": dict(tags),
+        "me": username,
+        "start_cp": int(evals[0]["cp"]),
+        "plies": [[r["uci"],
+                   "T" if r["best_is_best"] else {"blunder": "B", "mistake": "M", "inaccuracy": "I"}.get(r["cls"], "O"),
+                   int(evals[r["ply"] + 1]["cp"]), r["best_uci"]] for r in recs],
         "key_moments": [{
             "move_no": r["move_no"], "color": "w" if r["color"] == chess.WHITE else "b",
             "san": r["san"], "cls": r["cls"], "best": r["best_san"], "tags": r["tags"],
@@ -693,6 +710,23 @@ def tg_send(cfg, text, chat_id=None, markup=None):
 # --------------------------------------------------------------------------- pipeline
 
 
+def send_viewer(cfg, s, chat=None):
+    """Send the interactive review page as an .html file. Never raises."""
+    if build_viewer is None or not s.get("plies"):
+        return
+    try:
+        page = build_viewer(s, cfg.username)
+        when = datetime.fromtimestamp(s.get("end_time", time.time()), timezone.utc).strftime("%Y%m%d_%H%M")
+        name = f"review_{re.sub(r'[^A-Za-z0-9]+', '_', str(s.get('opp', 'game')))}_{when}.html"
+        r = requests.post(
+            f"https://api.telegram.org/bot{cfg.tg_token}/sendDocument",
+            data={"chat_id": chat or cfg.tg_chat, "caption": "📊 Interactive review: open in your browser"},
+            files={"document": (name, page.encode("utf-8"), "text/html")}, timeout=120)
+        r.raise_for_status()
+    except Exception:
+        log.exception("Could not send interactive review")
+
+
 class Analyzer:
     def __init__(self, cfg):
         self.cfg = cfg
@@ -715,8 +749,9 @@ class Analyzer:
 
 
 def process_games(cfg, state, games):
+    done = 0
     if not games:
-        return
+        return done
     with Analyzer(cfg) as an:
         for g in games:
             try:
@@ -727,8 +762,11 @@ def process_games(cfg, state, games):
             state.data["games"][g["url"]] = s
             state.data["seen"][g["url"]] = g.get("end_time", 0)
             tg_send(cfg, format_report(s))
+            send_viewer(cfg, s)
             state.save()
+            done += 1
             log.info("Reported %s", g["url"])
+    return done
 
 
 def check_new_games(cfg, state):
@@ -743,11 +781,12 @@ def check_new_games(cfg, state):
     new = [g for g in games if g["url"] not in seen]
     if new:
         log.info("%d new game(s)", len(new))
-    process_games(cfg, state, new)
+    done = process_games(cfg, state, new)
     # keep seen dict from growing forever
     cutoff = time.time() - 90 * 86400
     state.data["seen"] = {u: t for u, t in seen.items() if t >= cutoff}
     state.save()
+    return done
 
 
 def send_digest(cfg, state, days, chat_id=None):
@@ -857,7 +896,7 @@ def games_page(cfg, state, page):
 
 def analyse_and_send(cfg, state, g, chat=None):
     cached = state.data["games"].get(g["url"])
-    if cached:
+    if cached and cached.get("plies"):
         s = cached
     else:
         tg_send(cfg, "⏳ Analysing the game…", chat)
@@ -865,7 +904,9 @@ def analyse_and_send(cfg, state, g, chat=None):
             s = an.game(g)
         state.data["games"][g["url"]] = s
         state.data["seen"][g["url"]] = g.get("end_time", 0)
-    tg_send(cfg, format_report(s), chat, markup=main_menu())
+    tg_send(cfg, format_report(s), chat)
+    send_viewer(cfg, s, chat)
+    tg_send(cfg, "What next?", chat, markup=main_menu())
 
 
 def do_action(cfg, state, data, chat, msg_id=None, msg_text=""):
@@ -903,6 +944,7 @@ def do_action(cfg, state, data, chat, msg_id=None, msg_text=""):
 
 
 def handle_updates(cfg, state, timeout):
+    handled = 0
     res = tg_api(cfg, "getUpdates", offset=state.data["tg_offset"], timeout=timeout,
                  allowed_updates=["message", "callback_query"])
     for u in res.get("result", []):
@@ -929,6 +971,7 @@ def handle_updates(cfg, state, timeout):
                 action = CMD.get(words[0].split("@")[0])
         if not action:
             continue
+        handled += 1
         try:
             do_action(cfg, state, action, chat, msg_id, msg_text)
         except Exception:
@@ -936,6 +979,7 @@ def handle_updates(cfg, state, timeout):
             tg_send(cfg, "Something went wrong, check the logs.")
         state.save()
     state.save()
+    return handled
 
 
 def run_listen(cfg, state, minutes):
@@ -954,18 +998,31 @@ def run_listen(cfg, state, minutes):
     tg_send(cfg, "⚪ Session closed. Start it again from GitHub (Actions → Run workflow) or wait for the next automatic check.")
 
 
-def run_loop(cfg, state, deadline=None):
-    """Poll chess.com every POLL_MINUTES and answer Telegram buttons. Runs forever, or until `deadline`."""
+def run_loop(cfg, state, deadline=None, idle_minutes=0):
+    """Poll chess.com every POLL_MINUTES and answer Telegram buttons.
+    Runs forever, until `deadline`, or until nothing happened for `idle_minutes`."""
     log.info("Bot started for chess.com user %s", cfg.username)
     last_check = 0.0
-    while deadline is None or time.time() < deadline:
+    last_activity = time.time()
+    while True:
+        now = time.time()
+        if deadline is not None and now >= deadline:
+            log.info("Time is up, stopping")
+            break
+        if idle_minutes and now - last_activity > idle_minutes * 60:
+            log.info("No activity for %g min, stopping", idle_minutes)
+            break
         try:
-            if time.time() - last_check >= cfg.poll_minutes * 60:
-                last_check = time.time()
-                check_new_games(cfg, state)
+            if now - last_check >= cfg.poll_minutes * 60:
+                last_check = now
+                if check_new_games(cfg, state):
+                    last_activity = time.time()
                 maybe_weekly_digest(cfg, state)
-            wait = 25 if deadline is None else max(0, min(25, int(deadline - time.time())))
-            handle_updates(cfg, state, timeout=wait)
+            wait = 25
+            if deadline is not None:
+                wait = min(wait, max(0, int(deadline - time.time())))
+            if handle_updates(cfg, state, timeout=wait):
+                last_activity = time.time()
         except requests.RequestException as e:
             log.warning("Network error: %s", e)
             time.sleep(15)
@@ -974,14 +1031,17 @@ def run_loop(cfg, state, deadline=None):
             time.sleep(30)
 
 
-def run_watch(cfg, state, minutes):
+def run_watch(cfg, state, minutes, idle=0, quiet=False):
     """Live session: new games are reported ~30-60 s after they finish."""
     cfg.poll_minutes = float(os.environ.get("WATCH_POLL_SECONDS", "30")) / 60
-    tg_send(cfg, f"👀 <b>Live mode on for {minutes:g} min.</b> Every game you finish will be analysed automatically.",
-            markup=main_menu())
-    run_loop(cfg, state, deadline=time.time() + minutes * 60)
+    if not quiet:
+        extra = f" (it stops by itself after {idle:g} min without games)" if idle else ""
+        tg_send(cfg, f"👀 <b>Live mode on for up to {minutes:g} min{extra}.</b> Every game you finish will be analysed automatically.",
+                markup=main_menu())
+    run_loop(cfg, state, deadline=time.time() + minutes * 60, idle_minutes=idle)
     state.save()
-    tg_send(cfg, "⚪ Live mode finished. Start it again from GitHub (Actions → Chess live mode → Run workflow).")
+    if not quiet:
+        tg_send(cfg, "⚪ Live mode finished. It restarts by itself when you play a new game.")
 
 
 # --------------------------------------------------------------------------- cli
@@ -996,6 +1056,9 @@ def main():
     ap.add_argument("--probe", action="store_true", help="cheap check: print work=true/false for CI")
     ap.add_argument("--watch", type=float, default=0,
                     help="live mode: poll chess.com every ~30 s for N minutes, then exit")
+    ap.add_argument("--idle", type=float, default=0,
+                    help="with --watch: stop after N minutes without new games or button presses")
+    ap.add_argument("--quiet", action="store_true", help="with --watch: no start/stop messages")
     ap.add_argument("--listen", type=float, default=0,
                     help="after the check, stay online N minutes answering button presses")
     args = ap.parse_args()
@@ -1032,16 +1095,20 @@ def main():
     except Exception:
         log.warning("Could not register bot commands")
     if args.watch > 0:
-        run_watch(cfg, state, args.watch)
+        run_watch(cfg, state, args.watch, idle=args.idle, quiet=args.quiet)
         return
     if args.once:
         try:
             handle_updates(cfg, state, timeout=0)  # answer any /commands sent since last run
         except Exception:
             log.exception("Could not process Telegram commands")
-        check_new_games(cfg, state)
+        analysed = check_new_games(cfg, state) or 0
         maybe_weekly_digest(cfg, state)
         state.save()
+        out = os.environ.get("GITHUB_OUTPUT")
+        if out:
+            with open(out, "a") as f:
+                f.write(f"analysed={analysed}\n")
         if args.listen > 0:
             run_listen(cfg, state, args.listen)
             state.save()

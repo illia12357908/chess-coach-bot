@@ -1,0 +1,215 @@
+"""Builds a self-contained interactive game review page (one .html file, no internet needed)."""
+import html as _html
+import json
+
+import chess
+
+TEMPLATE = r"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>__TITLE__</title>
+<style>
+:root{--bg:#161512;--panel:#262421;--panel2:#302e2b;--tx:#e8e6e3;--mut:#9b9893;--acc:#7fb34a;--red:#e5483f;--org:#f0892b;--yel:#f2c230}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+a{color:#8cb4ff}
+.wrap{max-width:1000px;margin:0 auto;padding:12px 12px 40px;display:grid;gap:12px;grid-template-columns:1fr}
+@media(min-width:900px){.wrap{grid-template-columns:minmax(0,520px) minmax(0,1fr);align-items:start}.head{grid-column:1/-1}}
+.card{background:var(--panel);border-radius:10px;padding:12px}
+.head h1{margin:0 0 2px;font-size:19px}.head .sub{color:var(--mut);font-size:13px}
+.res{display:inline-block;padding:2px 9px;border-radius:99px;font-weight:700;font-size:13px;margin-right:6px}
+.win{background:#3d6b1f}.loss{background:#8c2b25}.draw{background:#5a5a5a}
+.acc{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.acc div{background:var(--panel2);border-radius:8px;padding:8px 10px}
+.acc b{font-size:22px}.acc span{color:var(--mut);font-size:12px;display:block}
+.counts{margin-top:8px;color:var(--mut);font-size:13px}.counts i{font-style:normal;font-weight:700}
+.boardrow{display:flex;gap:6px}
+#evalbar{width:14px;border-radius:4px;overflow:hidden;background:#333;position:relative;flex:none}
+#evalfill{position:absolute;left:0;right:0;background:#f1f1f1;transition:height .2s}
+#board{flex:1;min-width:0;width:100%;height:auto;display:block;border-radius:4px;touch-action:pan-y;user-select:none}
+.ctrl{display:flex;gap:6px;margin-top:10px}
+.ctrl button{flex:1;background:var(--panel2);color:var(--tx);border:0;border-radius:8px;padding:9px 0;font-size:22px;line-height:1.1;cursor:pointer}
+.ctrl button:active{background:#454340}
+#info{margin-top:10px;min-height:62px}
+.mvtitle{font-weight:700;font-size:16px;display:flex;align-items:center;gap:8px}
+.dot{width:12px;height:12px;border-radius:50%;display:inline-block}
+.evals{color:var(--mut);margin:2px 0 4px}
+#bestbtn{background:var(--acc);color:#10200a;border:0;border-radius:8px;padding:6px 10px;font-weight:700;margin-left:6px;cursor:pointer}
+#graph{width:100%;height:110px;display:block;border-radius:6px;touch-action:none;cursor:pointer}
+h2{margin:0 0 8px;font-size:14px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em}
+.moments{display:flex;flex-wrap:wrap;gap:6px}
+.moments button{background:var(--panel2);color:var(--tx);border:0;border-radius:99px;padding:6px 11px;cursor:pointer;font-size:14px}
+.moments button b{margin-left:4px}
+#moves{max-height:340px;overflow:auto;display:grid;grid-template-columns:34px 1fr 1fr;gap:2px 4px;font-size:15px}
+#moves .n{color:var(--mut);text-align:right;padding:5px 4px 5px 0}
+#moves .mv{padding:5px 7px;border-radius:6px;cursor:pointer;white-space:nowrap}
+#moves .mv:hover{background:var(--panel2)}
+#moves .mv.on{background:#4b6b2c;color:#fff}
+.bd{margin-left:3px;font-weight:700}
+.tips{color:var(--mut);font-size:12px;margin-top:8px}
+</style></head><body>
+<div class="wrap">
+ <div class="card head">
+  <h1 id="title"></h1><div class="sub" id="sub"></div>
+  <div class="acc"><div><b id="acc1"></b><span id="acc1n"></span></div><div><b id="acc2"></b><span id="acc2n"></span></div></div>
+  <div class="counts" id="counts"></div>
+ </div>
+ <div>
+  <div class="card">
+   <div class="boardrow"><div id="evalbar"><div id="evalfill"></div></div><svg id="board" viewBox="0 0 800 800"></svg></div>
+   <div class="ctrl"><button id="bFirst" title="Start">⏮</button><button id="bPrev" title="Back">‹</button><button id="bPlay" title="Autoplay">▶</button><button id="bNext" title="Forward">›</button><button id="bLast" title="End">⏭</button><button id="bFlip" title="Flip board">⇅</button></div>
+   <div id="info"></div>
+  </div>
+ </div>
+ <div>
+  <div class="card"><h2>Evaluation (tap or drag to jump)</h2><svg id="graph" viewBox="0 0 600 110" preserveAspectRatio="none"></svg></div>
+  <div class="card" style="margin-top:12px"><h2>Your key moments</h2><div class="moments" id="moments"></div></div>
+  <div class="card" style="margin-top:12px"><h2>Moves</h2><div id="moves"></div>
+   <div class="tips">Keys: ← → step, Home/End jump, F flip. On a phone: swipe the board left/right.</div></div>
+ </div>
+</div>
+<script id="data" type="application/json">__DATA__</script>
+<script>
+const D=JSON.parse(document.getElementById('data').textContent);
+const P=D.plies,N=P.length,M=D.meta;
+const $=id=>document.getElementById(id);
+const COL={B:'#e5483f',M:'#f0892b',I:'#f2c230',T:'#7fb34a',O:'#9aa0a6'};
+const SYM={B:'??',M:'?',I:'?!',T:'✓'};
+const NAME={B:'Blunder',M:'Mistake',I:'Inaccuracy',T:'Best move',O:'Good move'};
+const GL={K:'♚',Q:'♛',R:'♜',B:'♝',N:'♞',P:'♟'};
+let idx=0,flip=M.me==='black',alt=false,timer=null;
+const wp=cp=>{cp=Math.max(-1000,Math.min(1000,cp));return 50+50*(2/(1+Math.exp(-0.00368208*cp))-1)};
+const fmt=cp=>Math.abs(cp)>=9000?(cp>0?'+M':'-M'):((cp>0?'+':'')+(cp/100).toFixed(1));
+const cpAt=i=>i===0?D.start_cp:P[i-1].cp;
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function xy(f,r){return flip?[(7-f)*100,r*100]:[f*100,(7-r)*100]}
+function sq(u){return [u.charCodeAt(0)-97,+u[1]-1]}
+function parse(f){return f.split('/').map(r=>{const o=[];for(const ch of r){if(/\d/.test(ch)){for(let k=0;k<+ch;k++)o.push(null)}else o.push(ch)}return o})}
+function arrow(u,color){
+  const [f1,r1]=sq(u.slice(0,2)),[f2,r2]=sq(u.slice(2,4));
+  const a=xy(f1,r1).map(v=>v+50),b=xy(f2,r2).map(v=>v+50);
+  const dx=b[0]-a[0],dy=b[1]-a[1],L=Math.hypot(dx,dy)||1,ux=dx/L,uy=dy/L;
+  const hx=b[0]-ux*36,hy=b[1]-uy*36;
+  return `<line x1="${a[0]+ux*8}" y1="${a[1]+uy*8}" x2="${hx}" y2="${hy}" stroke="${color}" stroke-width="18" stroke-linecap="round" opacity=".85"/>`+
+   `<polygon points="${b[0]-ux*4},${b[1]-uy*4} ${hx-uy*30},${hy+ux*30} ${hx+uy*30},${hy-ux*30}" fill="${color}" opacity=".9"/>`;
+}
+function renderBoard(){
+  const view=(alt&&idx>0)?idx-1:idx;let s='';
+  for(let f=0;f<8;f++)for(let r=0;r<8;r++){const [x,y]=xy(f,r);s+=`<rect x="${x}" y="${y}" width="100" height="100" fill="${(f+r)%2?'#ebecd0':'#739552'}"/>`}
+  if(view>0){const u=P[view-1].u;for(const q of [u.slice(0,2),u.slice(2,4)]){const [f,r]=sq(q),[x,y]=xy(f,r);s+=`<rect x="${x}" y="${y}" width="100" height="100" fill="rgba(255,235,59,.5)"/>`}}
+  for(let i=0;i<8;i++){
+    const fl=flip?7-i:i,rk=flip?i:7-i;
+    s+=`<text x="${i*100+6}" y="${flip?18:792}" font-size="20" font-weight="700" fill="${(i+(flip?0:7))%2?'#739552':'#ebecd0'}">${String.fromCharCode(97+fl)}</text>`;
+    s+=`<text x="${flip?776:6}" y="${i*100+22}" font-size="20" font-weight="700" fill="${i%2?'#ebecd0':'#739552'}">${rk+1}</text>`;
+  }
+  const B=parse(D.fens[view]);
+  for(let i=0;i<8;i++)for(let f=0;f<8;f++){const ch=B[i][f];if(!ch)continue;
+    const [x,y]=xy(f,7-i),w=ch===ch.toUpperCase(),g=GL[ch.toUpperCase()]+'︎';
+    s+=`<text x="${x+50}" y="${y+80}" text-anchor="middle" font-size="88" font-family="'Segoe UI Symbol','Apple Symbols','DejaVu Sans','Noto Sans Symbols 2',serif" fill="${w?'#fff':'#1b1b1b'}" stroke="${w?'#222':'#e9e9e9'}" stroke-width="${w?3.5:1.2}" paint-order="stroke">${g}</text>`}
+  if(alt&&idx>0){const p=P[idx-1];if(p.b&&p.b!==p.u)s+=arrow(p.b,'#7fb34a');s+=arrow(p.u,'#e5483f')}
+  if(!alt&&idx>0){const p=P[idx-1];if(SYM[p.c]&&p.c!=='T'){const [f,r]=sq(p.u.slice(2,4)),[x,y]=xy(f,r);
+    s+=`<circle cx="${x+84}" cy="${y+16}" r="19" fill="${COL[p.c]}" stroke="#fff" stroke-width="2.5"/><text x="${x+84}" y="${y+24}" text-anchor="middle" font-size="22" font-weight="800" fill="#fff">${SYM[p.c]}</text>`}}
+  $('board').innerHTML=s;
+  const pct=wp(cpAt(view));const fill=$('evalfill');
+  fill.style.height=pct+'%';fill.style[flip?'top':'bottom']='0';fill.style[flip?'bottom':'top']='auto';
+}
+function renderInfo(){
+  if(idx===0){$('info').innerHTML=`<div class="mvtitle">Start of the game</div><div class="evals">Use ▶ or the arrow keys to step through, or tap a key moment.</div>`;return}
+  const p=P[idx-1],k=idx-1,no=Math.floor(k/2)+1,lbl=no+(k%2===0?'. ':'... ')+p.s;
+  let h=`<div class="mvtitle"><span class="dot" style="background:${COL[p.c]}"></span>${esc(lbl)} — ${NAME[p.c]}</div><div class="evals">Evaluation ${fmt(cpAt(idx-1))} → ${fmt(p.cp)}</div>`;
+  if(p.b&&p.b!==p.u&&'BMI'.includes(p.c))h+=`<div>Better was <b>${esc(p.bs)}</b><button id="bestbtn">${alt?'Back to game':'Show better move'}</button></div>`;
+  $('info').innerHTML=h;const b=$('bestbtn');if(b)b.onclick=()=>{alt=!alt;render()};
+}
+function renderGraph(){
+  const g=$('graph'),W=600,H=110,n=Math.max(N,1);
+  const X=i=>i*W/n,Y=i=>H*(1-wp(cpAt(i))/100);
+  let pts='';for(let i=0;i<=N;i++)pts+=` ${X(i).toFixed(1)},${Y(i).toFixed(1)}`;
+  let s=`<rect width="${W}" height="${H}" fill="#3a3835"/><polygon points="0,${H}${pts} ${W},${H}" fill="#e9e9e9"/><line x1="0" x2="${W}" y1="${H/2}" y2="${H/2}" stroke="#888" stroke-dasharray="4 4" stroke-width="1"/>`;
+  for(let k=0;k<N;k++){const c=P[k].c;if(c==='B'||c==='M')s+=`<circle cx="${X(k+1)}" cy="${Y(k+1)}" r="${c==='B'?5:4}" fill="${COL[c]}" stroke="#111" stroke-width="1"/>`}
+  s+=`<line x1="${X(idx)}" x2="${X(idx)}" y1="0" y2="${H}" stroke="#7fb34a" stroke-width="2.5"/>`;
+  g.innerHTML=s;
+}
+function buildMoves(){
+  let h='';for(let k=0;k<N;k+=2){
+    h+=`<div class="n">${k/2+1}.</div>`;
+    for(const j of [k,k+1]){if(j>=N){h+='<div></div>';continue}
+      const p=P[j],b=SYM[p.c]&&p.c!=='T'?`<span class="bd" style="color:${COL[p.c]}">${SYM[p.c]}</span>`:'';
+      h+=`<div class="mv" data-i="${j+1}">${esc(p.s)}${b}</div>`}}
+  $('moves').innerHTML=h;
+  $('moves').onclick=e=>{const t=e.target.closest('.mv');if(t){go(+t.dataset.i)}};
+}
+function renderMoves(){
+  document.querySelectorAll('#moves .mv').forEach(e=>e.classList.toggle('on',+e.dataset.i===idx));
+  const on=document.querySelector('#moves .mv.on');if(on){const c=$('moves');const t=on.offsetTop-c.offsetTop-c.clientHeight/2+on.clientHeight;c.scrollTo({top:t,behavior:'smooth'})}
+}
+function render(){renderBoard();renderInfo();renderGraph();renderMoves()}
+function go(i){idx=Math.max(0,Math.min(N,i));alt=false;render()}
+function step(d){go(idx+d)}
+function play(){if(timer){clearInterval(timer);timer=null;$('bPlay').textContent='▶';return}
+  if(idx>=N)idx=0;$('bPlay').textContent='⏸';timer=setInterval(()=>{if(idx>=N){play();return}step(1)},900)}
+function init(){
+  const me=M.me==='white'?M.white:M.black,opp=M.me==='white'?M.black:M.white;
+  $('title').innerHTML=`<span class="res ${M.outcome}">${M.outcome==='win'?'Win':M.outcome==='loss'?'Loss':'Draw'}</span>${esc(M.white)} vs ${esc(M.black)}`;
+  $('sub').innerHTML=`${esc(M.welo)} vs ${esc(M.belo)} · ${esc(M.tc)} · ${M.opening_url?`<a href="${esc(M.opening_url)}" target="_blank" rel="noopener">${esc(M.opening)}</a>`:esc(M.opening)}${M.url?` · <a href="${esc(M.url)}" target="_blank" rel="noopener">chess.com</a>`:''}${M.term?`<br>${esc(M.term)}`:''}`;
+  $('acc1').textContent=M.acc_me;$('acc1n').textContent='Your accuracy ('+esc(me)+')';
+  $('acc2').textContent=M.acc_opp;$('acc2n').textContent='Opponent ('+esc(opp)+')';
+  $('counts').innerHTML=`Your moves: <i style="color:${COL.B}">${M.blunders} blunder${M.blunders===1?'':'s'}</i> · <i style="color:${COL.M}">${M.mistakes} mistake${M.mistakes===1?'':'s'}</i> · <i style="color:${COL.I}">${M.inaccuracies} inaccurac${M.inaccuracies===1?'y':'ies'}</i>`;
+  const mine=M.me==='white'?0:1;let km='';
+  for(let k=0;k<N;k++){if(k%2===mine&&(P[k].c==='B'||P[k].c==='M')){const no=Math.floor(k/2)+1;km+=`<button data-i="${k+1}">${no}${k%2?'...':'.'} ${esc(P[k].s)}<b style="color:${COL[P[k].c]}">${SYM[P[k].c]}</b></button>`}}
+  $('moments').innerHTML=km||'<span style="color:var(--mut)">No mistakes or blunders. Clean game! 👏</span>';
+  $('moments').onclick=e=>{const t=e.target.closest('button');if(t)go(+t.dataset.i)};
+  buildMoves();render();
+}
+$('bFirst').onclick=()=>go(0);$('bLast').onclick=()=>go(N);$('bPrev').onclick=()=>step(-1);$('bNext').onclick=()=>step(1);
+$('bPlay').onclick=play;$('bFlip').onclick=()=>{flip=!flip;render()};
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowLeft'){step(-1);e.preventDefault()}else if(e.key==='ArrowRight'){step(1);e.preventDefault()}
+  else if(e.key==='Home')go(0);else if(e.key==='End')go(N);else if(e.key==='f'||e.key==='F'){flip=!flip;render()}});
+let sx=null;const bd=$('board');
+bd.addEventListener('touchstart',e=>{sx=e.touches[0].clientX},{passive:true});
+bd.addEventListener('touchend',e=>{if(sx===null)return;const d=e.changedTouches[0].clientX-sx;if(Math.abs(d)>40)step(d<0?1:-1);sx=null});
+const gr=$('graph');let drag=false;
+function seek(e){const r=gr.getBoundingClientRect();go(Math.round((e.clientX-r.left)/r.width*N))}
+gr.addEventListener('pointerdown',e=>{drag=true;seek(e)});gr.addEventListener('pointermove',e=>{if(drag)seek(e)});
+window.addEventListener('pointerup',()=>{drag=false});
+init();
+</script></body></html>
+"""
+
+
+def build_viewer(s, username=""):
+    """s = analysis summary from analyse_game (must contain 'plies'). Returns an HTML string."""
+    plies = s["plies"]
+    me = username or s.get("me", "you")
+    board = chess.Board()
+    fens = [board.board_fen()]
+    out = []
+    for u, cls, cp, best in plies:
+        mv = chess.Move.from_uci(u)
+        san = board.san(mv)
+        best_san = ""
+        if best and best != u:
+            try:
+                best_san = board.san(chess.Move.from_uci(best))
+            except Exception:
+                best_san = ""
+        board.push(mv)
+        fens.append(board.board_fen())
+        out.append({"u": u, "s": san, "c": cls, "cp": cp, "b": best or "", "bs": best_san})
+
+    white_me = s["color"] == "white"
+    meta = {
+        "me": s["color"],
+        "white": me if white_me else s["opp"],
+        "black": s["opp"] if white_me else me,
+        "welo": s["my_rating"] if white_me else s["opp_rating"],
+        "belo": s["opp_rating"] if white_me else s["my_rating"],
+        "outcome": s["outcome"], "tc": ((s.get("time_class") or "") + " " + str(s.get("time_control", ""))).strip(),
+        "opening": s["opening"], "opening_url": s.get("opening_url", ""), "url": s.get("url", ""),
+        "term": s.get("termination", ""), "acc_me": s["accuracy"], "acc_opp": s["opp_accuracy"],
+        "blunders": s["blunders"], "mistakes": s["mistakes"], "inaccuracies": s["inaccuracies"],
+    }
+    data = {"meta": meta, "start_cp": s.get("start_cp", 0), "plies": out, "fens": fens}
+    payload = json.dumps(data, separators=(",", ":"), ensure_ascii=False).replace("</", "<\\/")
+    title = _html.escape(f"{meta['white']} vs {meta['black']}")
+    return TEMPLATE.replace("__TITLE__", title).replace("__DATA__", payload)
