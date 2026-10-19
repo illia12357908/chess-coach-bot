@@ -7,7 +7,7 @@ on:
     inputs:
       listen_minutes:
         description: "Stay online N minutes so Telegram buttons answer instantly (0 = just one check)"
-        default: "10"
+        default: "0"
 
 permissions:
   contents: write                # needed to save data/state.json back to the repo
@@ -69,7 +69,7 @@ jobs:
       # A new game was found: stay online so the next games are reported within ~1 minute.
       # The live session stops by itself after 25 minutes without a new game.
       - name: Start live session
-        if: steps.run.outputs.analysed != '' && steps.run.outputs.analysed != '0'
+        if: (steps.run.outputs.analysed != '' && steps.run.outputs.analysed != '0') || (github.event_name == 'workflow_dispatch' && github.event.inputs.listen_minutes == '0')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run chess-live.yml --repo ${{ github.repository }} -f minutes=330 -f idle=25 -f quiet=true
+        run: gh workflow run chess-live.yml --repo ${{ github.repository }} -f minutes=330 -f idle=120 -f quiet=true

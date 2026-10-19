@@ -29,7 +29,7 @@ Everything runs on **GitHub Actions** (free for public repos) with Stockfish. No
 6. **Settings → Pages → Deploy from a branch → `main` → `/docs` → Save.** This makes the interactive review open as a link.
    (Without it the bot still works and sends the review as an .html file, which you must open in Chrome/Safari.)
 
-Done. The bot checks chess.com every ~5 minutes. After a game it starts a live session that checks every 30 seconds and shuts itself off after 25 idle minutes.
+Done. The bot checks chess.com every ~5 minutes. After a game it starts a live session that checks every 30 seconds and shuts itself off after 2 idle hours.
 
 ## Instant reports (optional, recommended)
 GitHub's own schedule is slow (5–15 minutes). The free **Cloudflare Worker** in `cloudflare/worker.js` checks chess.com every minute and starts the bot as soon as a game ends.
