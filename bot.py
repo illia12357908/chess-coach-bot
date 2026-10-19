@@ -32,9 +32,10 @@ import chess.pgn
 import requests
 
 try:
-    from viewer import build_viewer
+    from viewer import build_viewer, review_url
 except Exception:  # viewer is optional
     build_viewer = None
+    review_url = None
 
 try:
     from dotenv import load_dotenv
@@ -710,17 +711,54 @@ def tg_send(cfg, text, chat_id=None, markup=None):
 # --------------------------------------------------------------------------- pipeline
 
 
+_pages_ok = {}
+
+
+def review_base_url():
+    """Where the static viewer lives (GitHub Pages). REVIEW_BASE_URL overrides the guess."""
+    base = os.environ.get("REVIEW_BASE_URL", "").strip()
+    if not base:
+        repo = os.environ.get("GITHUB_REPOSITORY", "")
+        if "/" in repo:
+            owner, name = repo.split("/", 1)
+            base = f"https://{owner.lower()}.github.io/{name}/"
+    return base
+
+
+def pages_live(base):
+    if base not in _pages_ok:
+        try:
+            _pages_ok[base] = requests.get(base, timeout=15).status_code == 200
+        except Exception:
+            _pages_ok[base] = False
+        if not _pages_ok[base]:
+            log.warning("Review page %s is not reachable; falling back to an .html file", base)
+    return _pages_ok[base]
+
+
 def send_viewer(cfg, s, chat=None):
-    """Send the interactive review page as an .html file. Never raises."""
+    """Send the interactive review as a link button (GitHub Pages); fall back to an .html file. Never raises."""
     if build_viewer is None or not s.get("plies"):
         return
+    chat = chat or cfg.tg_chat
+    try:
+        base = review_base_url()
+        if base and review_url and pages_live(base):
+            url = review_url(base, s, cfg.username)
+            if len(url) <= 2000:
+                tg_api(cfg, "sendMessage", chat_id=chat, text="📊 Interactive review: board, moves, eval graph",
+                       reply_markup={"inline_keyboard": [[{"text": "♟ Open review", "url": url}]]})
+                return
+            log.warning("Review link too long (%d chars); sending file", len(url))
+    except Exception:
+        log.exception("Could not send review link")
     try:
         page = build_viewer(s, cfg.username)
         when = datetime.fromtimestamp(s.get("end_time", time.time()), timezone.utc).strftime("%Y%m%d_%H%M")
         name = f"review_{re.sub(r'[^A-Za-z0-9]+', '_', str(s.get('opp', 'game')))}_{when}.html"
         r = requests.post(
             f"https://api.telegram.org/bot{cfg.tg_token}/sendDocument",
-            data={"chat_id": chat or cfg.tg_chat, "caption": "📊 Interactive review: open in your browser"},
+            data={"chat_id": chat, "caption": "📊 Interactive review: save the file and open it in Chrome/Safari"},
             files={"document": (name, page.encode("utf-8"), "text/html")}, timeout=120)
         r.raise_for_status()
     except Exception:

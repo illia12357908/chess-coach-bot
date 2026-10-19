@@ -1,6 +1,8 @@
 """Builds a self-contained interactive game review page (one .html file, no internet needed)."""
+import base64
 import html as _html
 import json
+import zlib
 
 import chess
 
@@ -70,9 +72,20 @@ h2{margin:0 0 8px;font-size:14px;color:var(--mut);text-transform:uppercase;lette
 </div>
 <script id="data" type="application/json">__DATA__</script>
 <script>
-const D=JSON.parse(document.getElementById('data').textContent);
-const P=D.plies,N=P.length,M=D.meta;
 const $=id=>document.getElementById(id);
+function b64ToBytes(h){h=h.replace(/-/g,'+').replace(/_/g,'/');while(h.length%4)h+='=';const bin=atob(h),o=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)o[i]=bin.charCodeAt(i);return o}
+async function loadData(){
+  const el=$('data');const txt=el&&el.textContent.trim();
+  if(txt)return JSON.parse(txt);
+  const h=location.hash.slice(1);
+  if(!h)throw new Error('No game data in this link. Open the review from the button in Telegram.');
+  if(typeof DecompressionStream==='undefined')throw new Error('This browser is too old. Open the link in Chrome or Safari (iOS 16.4+).');
+  const stream=new Blob([b64ToBytes(h)]).stream().pipeThrough(new DecompressionStream('deflate'));
+  return JSON.parse(await new Response(stream).text());
+}
+function boot(D){
+const M=D.meta;
+const P=D.plies.map(p=>({u:p[0],s:p[1],c:p[2],cp:p[3],b:p[4],bs:p[5]})),N=P.length;
 const COL={B:'#e5483f',M:'#f0892b',I:'#f2c230',T:'#7fb34a',O:'#9aa0a6'};
 const SYM={B:'??',M:'?',I:'?!',T:'✓'};
 const NAME={B:'Blunder',M:'Mistake',I:'Inaccuracy',T:'Best move',O:'Good move'};
@@ -84,7 +97,19 @@ const cpAt=i=>i===0?D.start_cp:P[i-1].cp;
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function xy(f,r){return flip?[(7-f)*100,r*100]:[f*100,(7-r)*100]}
 function sq(u){return [u.charCodeAt(0)-97,+u[1]-1]}
-function parse(f){return f.split('/').map(r=>{const o=[];for(const ch of r){if(/\d/.test(ch)){for(let k=0;k<+ch;k++)o.push(null)}else o.push(ch)}return o})}
+// ---- board positions: B[r][f], r=0 is rank 1 ----
+function startBoard(){const b=[];const back='RNBQKBNR';
+  b.push([...back]);b.push(Array(8).fill('P'));for(let i=0;i<4;i++)b.push(Array(8).fill(null));
+  b.push(Array(8).fill('p'));b.push([...back.toLowerCase()]);return b}
+function applyUci(b,u){
+  const [f1,r1]=sq(u.slice(0,2)),[f2,r2]=sq(u.slice(2,4));let p=b[r1][f1];
+  if(p&&p.toLowerCase()==='p'&&f1!==f2&&!b[r2][f2])b[r1][f2]=null;
+  if(p&&p.toLowerCase()==='k'&&Math.abs(f2-f1)===2){const rf=f2>f1?7:0,rt=f2>f1?5:3;b[r1][rt]=b[r1][rf];b[r1][rf]=null}
+  if(u.length>4)p=p===p.toUpperCase()?u[4].toUpperCase():u[4].toLowerCase();
+  b[r2][f2]=p;b[r1][f1]=null}
+const boards=[startBoard()];
+for(const p of P){const nb=boards[boards.length-1].map(r=>r.slice());applyUci(nb,p.u);boards.push(nb)}
+window.__fen=i=>{let s=[];for(let r=7;r>=0;r--){let row='',e=0;for(let f=0;f<8;f++){const c=boards[i][r][f];if(!c)e++;else{if(e){row+=e;e=0}row+=c}}if(e)row+=e;s.push(row)}return s.join('/')};
 function arrow(u,color){
   const [f1,r1]=sq(u.slice(0,2)),[f2,r2]=sq(u.slice(2,4));
   const a=xy(f1,r1).map(v=>v+50),b=xy(f2,r2).map(v=>v+50);
@@ -102,8 +127,8 @@ function renderBoard(){
     s+=`<text x="${i*100+6}" y="${flip?18:792}" font-size="20" font-weight="700" fill="${(i+(flip?0:7))%2?'#739552':'#ebecd0'}">${String.fromCharCode(97+fl)}</text>`;
     s+=`<text x="${flip?776:6}" y="${i*100+22}" font-size="20" font-weight="700" fill="${i%2?'#ebecd0':'#739552'}">${rk+1}</text>`;
   }
-  const B=parse(D.fens[view]);
-  for(let i=0;i<8;i++)for(let f=0;f<8;f++){const ch=B[i][f];if(!ch)continue;
+  const Bd=boards[view];
+  for(let i=0;i<8;i++)for(let f=0;f<8;f++){const ch=Bd[7-i][f];if(!ch)continue;
     const [x,y]=xy(f,7-i),w=ch===ch.toUpperCase(),g=GL[ch.toUpperCase()]+'︎';
     s+=`<text x="${x+50}" y="${y+80}" text-anchor="middle" font-size="88" font-family="'Segoe UI Symbol','Apple Symbols','DejaVu Sans','Noto Sans Symbols 2',serif" fill="${w?'#fff':'#1b1b1b'}" stroke="${w?'#222':'#e9e9e9'}" stroke-width="${w?3.5:1.2}" paint-order="stroke">${g}</text>`}
   if(alt&&idx>0){const p=P[idx-1];if(p.b&&p.b!==p.u)s+=arrow(p.b,'#7fb34a');s+=arrow(p.u,'#e5483f')}
@@ -151,9 +176,10 @@ function init(){
   const me=M.me==='white'?M.white:M.black,opp=M.me==='white'?M.black:M.white;
   $('title').innerHTML=`<span class="res ${M.outcome}">${M.outcome==='win'?'Win':M.outcome==='loss'?'Loss':'Draw'}</span>${esc(M.white)} vs ${esc(M.black)}`;
   $('sub').innerHTML=`${esc(M.welo)} vs ${esc(M.belo)} · ${esc(M.tc)} · ${M.opening_url?`<a href="${esc(M.opening_url)}" target="_blank" rel="noopener">${esc(M.opening)}</a>`:esc(M.opening)}${M.url?` · <a href="${esc(M.url)}" target="_blank" rel="noopener">chess.com</a>`:''}${M.term?`<br>${esc(M.term)}`:''}`;
-  $('acc1').textContent=M.acc_me;$('acc1n').textContent='Your accuracy ('+esc(me)+')';
-  $('acc2').textContent=M.acc_opp;$('acc2n').textContent='Opponent ('+esc(opp)+')';
+  $('acc1').textContent=M.acc_me;$('acc1n').textContent='Your accuracy ('+me+')';
+  $('acc2').textContent=M.acc_opp;$('acc2n').textContent='Opponent ('+opp+')';
   $('counts').innerHTML=`Your moves: <i style="color:${COL.B}">${M.blunders} blunder${M.blunders===1?'':'s'}</i> · <i style="color:${COL.M}">${M.mistakes} mistake${M.mistakes===1?'':'s'}</i> · <i style="color:${COL.I}">${M.inaccuracies} inaccurac${M.inaccuracies===1?'y':'ies'}</i>`;
+  document.title=M.white+' vs '+M.black;
   const mine=M.me==='white'?0:1;let km='';
   for(let k=0;k<N;k++){if(k%2===mine&&(P[k].c==='B'||P[k].c==='M')){const no=Math.floor(k/2)+1;km+=`<button data-i="${k+1}">${no}${k%2?'...':'.'} ${esc(P[k].s)}<b style="color:${COL[P[k].c]}">${SYM[P[k].c]}</b></button>`}}
   $('moments').innerHTML=km||'<span style="color:var(--mut)">No mistakes or blunders. Clean game! 👏</span>';
@@ -173,18 +199,19 @@ function seek(e){const r=gr.getBoundingClientRect();go(Math.round((e.clientX-r.l
 gr.addEventListener('pointerdown',e=>{drag=true;seek(e)});gr.addEventListener('pointermove',e=>{if(drag)seek(e)});
 window.addEventListener('pointerup',()=>{drag=false});
 init();
+}
+function fail(e){document.querySelector('.wrap').innerHTML='<div class="card" style="grid-column:1/-1"><h1>Chess review</h1><p>'+String(e.message||e).replace(/[<>&]/g,'')+'</p></div>'}
+loadData().then(boot).catch(fail);
 </script></body></html>
 """
 
 
-def build_viewer(s, username=""):
-    """s = analysis summary from analyse_game (must contain 'plies'). Returns an HTML string."""
-    plies = s["plies"]
+def _game_data(s, username=""):
+    """Compact game data shared by the embedded and the link versions."""
     me = username or s.get("me", "you")
     board = chess.Board()
-    fens = [board.board_fen()]
-    out = []
-    for u, cls, cp, best in plies:
+    plies = []
+    for u, cls, cp, best in s["plies"]:
         mv = chess.Move.from_uci(u)
         san = board.san(mv)
         best_san = ""
@@ -194,9 +221,7 @@ def build_viewer(s, username=""):
             except Exception:
                 best_san = ""
         board.push(mv)
-        fens.append(board.board_fen())
-        out.append({"u": u, "s": san, "c": cls, "cp": cp, "b": best or "", "bs": best_san})
-
+        plies.append([u, san, cls, cp, best if best != u else "", best_san])
     white_me = s["color"] == "white"
     meta = {
         "me": s["color"],
@@ -209,7 +234,33 @@ def build_viewer(s, username=""):
         "term": s.get("termination", ""), "acc_me": s["accuracy"], "acc_opp": s["opp_accuracy"],
         "blunders": s["blunders"], "mistakes": s["mistakes"], "inaccuracies": s["inaccuracies"],
     }
-    data = {"meta": meta, "start_cp": s.get("start_cp", 0), "plies": out, "fens": fens}
+    return {"meta": meta, "start_cp": s.get("start_cp", 0), "plies": plies}
+
+
+def build_viewer(s, username=""):
+    """Self-contained page with the game embedded (works offline from a file)."""
+    data = _game_data(s, username)
     payload = json.dumps(data, separators=(",", ":"), ensure_ascii=False).replace("</", "<\\/")
+    meta = data["meta"]
     title = _html.escape(f"{meta['white']} vs {meta['black']}")
     return TEMPLATE.replace("__TITLE__", title).replace("__DATA__", payload)
+
+
+def build_static_page():
+    """The page that lives on GitHub Pages; the game itself comes in the URL after the #."""
+    return TEMPLATE.replace("__TITLE__", "Chess review").replace("__DATA__", "")
+
+
+def review_url(base_url, s, username=""):
+    """Link to the Pages viewer with the (compressed) game in the fragment."""
+    raw = json.dumps(_game_data(s, username), separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    token = base64.urlsafe_b64encode(zlib.compress(raw, 9)).decode("ascii").rstrip("=")
+    return base_url.rstrip("/") + "/#" + token
+
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) == 3 and sys.argv[1] == "--write-static":
+        with open(sys.argv[2], "w", encoding="utf-8") as f:
+            f.write(build_static_page())
+        print("written", sys.argv[2])
