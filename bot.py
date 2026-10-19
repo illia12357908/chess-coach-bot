@@ -726,14 +726,20 @@ def review_base_url():
 
 
 def pages_live(base):
-    if base not in _pages_ok:
-        try:
-            _pages_ok[base] = requests.get(base, timeout=15).status_code == 200
-        except Exception:
-            _pages_ok[base] = False
-        if not _pages_ok[base]:
-            log.warning("Review page %s is not reachable; falling back to an .html file", base)
-    return _pages_ok[base]
+    """True if the viewer page answers. Only a success is cached, a failure is retried after 60 s."""
+    ok_at, bad_at = _pages_ok.get(base, (0, 0))
+    if ok_at:
+        return True
+    if bad_at and time.time() - bad_at < 60:
+        return False
+    try:
+        up = requests.get(base, timeout=15).status_code == 200
+    except Exception:
+        up = False
+    _pages_ok[base] = (time.time(), 0) if up else (0, time.time())
+    if not up:
+        log.warning("Review page %s is not reachable; falling back to an .html file", base)
+    return up
 
 
 def send_viewer(cfg, s, chat=None):
