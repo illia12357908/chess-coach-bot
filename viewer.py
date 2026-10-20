@@ -14,7 +14,7 @@ TEMPLATE = r"""<!doctype html>
 <style>
 :root{--bg:#161512;--panel:#262421;--panel2:#302e2b;--tx:#e8e6e3;--mut:#9b9893;--acc:#7fb34a;--red:#e5483f;--org:#f0892b;--yel:#f2c230}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-variant-numeric:tabular-nums;-webkit-text-size-adjust:100%;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
 a{color:#8cb4ff}
 .wrap{max-width:1000px;margin:0 auto;padding:12px 12px 40px;display:grid;gap:12px;grid-template-columns:1fr}
 @media(min-width:900px){.wrap{grid-template-columns:minmax(0,520px) minmax(0,1fr);align-items:start}.head{grid-column:1/-1}}
@@ -26,14 +26,14 @@ a{color:#8cb4ff}
 .win{background:#3d6b1f}.loss{background:#8c2b25}.draw{background:#5a5a5a}
 .acc{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
 .acc div{background:var(--panel2);border-radius:8px;padding:8px 10px}
-.acc b{font-size:22px}.acc span{color:var(--mut);font-size:12px;display:block}
+.acc b{font-size:26px;letter-spacing:-.01em}.acc span{color:var(--mut);font-size:12px;display:block}
 .counts{margin-top:8px;color:var(--mut);font-size:13px}.counts i{font-style:normal;font-weight:700}
 .boardrow{display:flex;gap:6px}
 #evalbar{width:14px;border-radius:4px;overflow:hidden;background:#333;position:relative;flex:none}
 #evalfill{position:absolute;left:0;right:0;background:#f1f1f1;transition:height .2s}
 #board{flex:1;min-width:0;width:100%;height:auto;display:block;border-radius:4px;touch-action:pan-y;user-select:none}
 .ctrl{display:flex;gap:6px;margin-top:10px}
-.ctrl button{flex:1;background:var(--panel2);color:var(--tx);border:0;border-radius:8px;padding:9px 0;font-size:22px;line-height:1.1;cursor:pointer}
+.ctrl button{flex:1;min-height:46px;background:var(--panel2);color:var(--tx);border:0;border-radius:8px;padding:9px 0;font-size:22px;line-height:1.1;cursor:pointer}
 .ctrl button:active{background:#454340}
 .ctrl svg{width:22px;height:22px;display:block;margin:0 auto;fill:currentColor}
 .ctrl button#bPlay{background:var(--acc);color:#10200a}
@@ -46,7 +46,7 @@ a{color:#8cb4ff}
 .evals{color:var(--mut);margin:2px 0 4px}
 #bestbtn{background:var(--acc);color:#10200a;border:0;border-radius:8px;padding:6px 10px;font-weight:700;margin-left:6px;cursor:pointer}
 #graph{width:100%;height:110px;display:block;border-radius:6px;touch-action:none;cursor:pointer}
-h2{margin:0 0 8px;font-size:14px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em}
+h2{margin:0 0 8px;font-size:15px;font-weight:700;color:var(--tx)}
 .moments{display:flex;flex-wrap:wrap;gap:6px}
 .moments button{background:var(--panel2);color:var(--tx);border:0;border-radius:99px;padding:6px 11px;cursor:pointer;font-size:14px}
 .moments button b{margin-left:4px}
@@ -81,6 +81,9 @@ h2{margin:0 0 8px;font-size:14px;color:var(--mut);text-transform:uppercase;lette
 #momnav{display:none}
 #momnav button{flex:1;background:var(--panel2);color:var(--tx);border:0;border-radius:8px;padding:9px 6px;font-size:14px;cursor:pointer}
 #momnav button.go{background:var(--acc);color:#10200a;font-weight:700}
+button:focus-visible,.mv:focus-visible,.km:focus-visible,.sm:focus-visible{outline:2px solid #8cb4ff;outline-offset:2px}
+.km{min-height:44px}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
 </style></head><body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>__PIECES__</defs></svg>
 <div class="wrap">
