@@ -17,6 +17,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: chess-bot              # same group as the scheduled workflow, so they never run at the same time
@@ -55,6 +56,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Live mode
+        id: live
         run: python bot.py --watch ${{ github.event.inputs.minutes || '180' }} --idle ${{ github.event.inputs.idle || '0' }} ${{ github.event.inputs.quiet == 'true' && '--quiet' || '' }}
 
       - name: Save state
@@ -71,3 +73,10 @@ jobs:
               sleep $((i * 3))
             done
           fi
+
+      # New bot code was pushed while this session was running: start a fresh session on the new code.
+      - name: Restart on newer code
+        if: always() && steps.live.outputs.restart == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run chess-live.yml --repo ${{ github.repository }} -f minutes=330 -f idle=120 -f quiet=true

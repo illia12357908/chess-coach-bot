@@ -20,6 +20,7 @@ import logging
 import math
 import os
 import re
+import subprocess
 import sys
 import time
 from collections import Counter, defaultdict
@@ -1082,14 +1083,36 @@ def run_listen(cfg, state, minutes):
     tg_send(cfg, "⚪ Session closed. Start it again from GitHub (Actions → Run workflow) or wait for the next automatic check.")
 
 
-def run_loop(cfg, state, deadline=None, idle_minutes=0):
+RESTART_REQUESTED = False
+
+
+def newer_code_available():
+    """True when main on GitHub has a newer bot.py / viewer.py than the code this session started with."""
+    try:
+        subprocess.run(["git", "fetch", "-q", "origin", "main"], check=True, timeout=60, capture_output=True)
+        out = subprocess.run(["git", "diff", "--name-only", "HEAD", "origin/main"],
+                             capture_output=True, text=True, timeout=30).stdout.split()
+        return any(f in ("bot.py", "viewer.py", "requirements.txt") for f in out)
+    except Exception:
+        return False
+
+
+def run_loop(cfg, state, deadline=None, idle_minutes=0, restart_check=False):
     """Poll chess.com every POLL_MINUTES and answer Telegram buttons.
     Runs forever, until `deadline`, or until nothing happened for `idle_minutes`."""
     log.info("Bot started for chess.com user %s", cfg.username)
+    global RESTART_REQUESTED
     last_check = 0.0
     last_activity = time.time()
+    last_code_check = time.time()
     while True:
         now = time.time()
+        if restart_check and now - last_code_check >= 300:
+            last_code_check = now
+            if newer_code_available():
+                log.info("Newer bot code on main, restarting the live session")
+                RESTART_REQUESTED = True
+                break
         if deadline is not None and now >= deadline:
             log.info("Time is up, stopping")
             break
@@ -1122,8 +1145,14 @@ def run_watch(cfg, state, minutes, idle=0, quiet=False):
         extra = f" (it stops by itself after {idle:g} min without games)" if idle else ""
         tg_send(cfg, f"👀 <b>Live mode on for up to {minutes:g} min{extra}.</b> Every game you finish will be analysed automatically.",
                 markup=main_menu())
-    run_loop(cfg, state, deadline=time.time() + minutes * 60, idle_minutes=idle)
+    run_loop(cfg, state, deadline=time.time() + minutes * 60, idle_minutes=idle, restart_check=True)
     state.save()
+    if RESTART_REQUESTED:
+        out = os.environ.get("GITHUB_OUTPUT")
+        if out:
+            with open(out, "a") as f:
+                f.write("restart=true\n")
+        return
     if not quiet:
         tg_send(cfg, "⚪ Live mode finished. It restarts by itself when you play a new game.")
 
