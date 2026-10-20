@@ -277,13 +277,14 @@ def eval_str(cp):
 def analyse_position(engine, board, limit):
     if board.is_checkmate():
         cp = -10000 if board.turn == chess.WHITE else 10000
-        return {"cp": cp, "mate": 0, "best": None}
+        return {"cp": cp, "mate": 0, "best": None, "pv": []}
     if board.is_game_over(claim_draw=False):
-        return {"cp": 0, "mate": None, "best": None}
+        return {"cp": 0, "mate": None, "best": None, "pv": []}
     info = engine.analyse(board, limit)
     s = info["score"].white()
     pv = info.get("pv") or []
-    return {"cp": s.score(mate_score=10000), "mate": s.mate(), "best": pv[0] if pv else None}
+    return {"cp": s.score(mate_score=10000), "mate": s.mate(), "best": pv[0] if pv else None,
+            "pv": [m.uci() for m in pv[:10]]}
 
 
 def analyse_game(pgn_text, username, engine, limit, extra=None):
@@ -460,7 +461,10 @@ def analyse_game(pgn_text, username, engine, limit, extra=None):
         "plies": [[r["uci"],
                    "R" if r["ply"] in brill else "T" if r["best_is_best"] else {"blunder": "B", "mistake": "M", "inaccuracy": "I"}.get(
                        r["cls"], "X" if r["loss"] < 2 else "O"),
-                   int(evals[r["ply"] + 1]["cp"]), r["best_uci"], "|".join(r["tags"])] for r in recs],
+                   int(evals[r["ply"] + 1]["cp"]), r["best_uci"], "|".join(r["tags"]),
+                   " ".join(evals[r["ply"]]["pv"]) if (
+                       r["cls"] in ("blunder", "mistake") or r["ply"] in brill
+                       or (r["cls"] == "inaccuracy" and r["color"] == color)) else ""] for r in recs],
         "key_moments": [{
             "move_no": r["move_no"], "color": "w" if r["color"] == chess.WHITE else "b",
             "san": r["san"], "cls": r["cls"], "best": r["best_san"], "tags": r["tags"],
