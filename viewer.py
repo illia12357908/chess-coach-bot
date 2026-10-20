@@ -60,9 +60,9 @@ h2{margin:0 0 8px;font-size:14px;color:var(--mut);text-transform:uppercase;lette
 #info .why{margin:6px 0 2px;line-height:1.45}
 #stripwrap{position:relative;margin-top:10px;background:var(--panel2);border-radius:10px;height:58px;transition:opacity .2s}
 #stripwrap.dim{opacity:.45}
-#strip{display:flex;align-items:center;overflow-x:auto;height:100%;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding:0 calc(50% - 40px);overscroll-behavior-x:contain}
+#strip{display:flex;align-items:center;overflow-x:auto;height:100%;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding:0 calc(50% - 40px);overscroll-behavior-x:contain;scroll-snap-type:x mandatory}
 #strip::-webkit-scrollbar{display:none}
-.sm{flex:none;width:80px;text-align:center;font-weight:700;font-size:17px;cursor:pointer;opacity:.3;white-space:nowrap;user-select:none}
+.sm{flex:none;scroll-snap-align:center;scroll-snap-stop:always;width:80px;text-align:center;font-weight:700;font-size:17px;cursor:pointer;opacity:.3;white-space:nowrap;user-select:none}
 .sm .no{display:block;font-size:10px;color:var(--mut);font-weight:500;line-height:1.1}
 .sm .bg{font-size:12px;margin-left:2px}
 #frame{position:absolute;left:50%;top:5px;bottom:5px;width:80px;margin-left:-40px;border:2px solid var(--acc);border-radius:9px;pointer-events:none}
@@ -93,6 +93,7 @@ h2{margin:0 0 8px;font-size:14px;color:var(--mut);text-transform:uppercase;lette
   <div class="card">
    <div class="boardrow"><div id="evalbar"><div id="evalfill"></div></div><svg id="board" viewBox="-56 0 856 860"></svg></div>
    <div class="ctrl"><button id="bFirst" title="Start"></button><button id="bPrev" title="Back"></button><button id="bPlay" title="Play review (stops at key moments)"></button><button id="bNext" title="Forward"></button><button id="bLast" title="End"></button><button id="bFlip" title="Flip board"></button><button id="bSnd" title="Sound on/off"></button></div>
+   <label id="hl" style="position:fixed;left:-200px;top:0;opacity:0;pointer-events:none" aria-hidden="true"><input type="checkbox" switch id="hs"></label>
    <div id="stripwrap"><div id="strip"></div><div id="frame"></div></div>
    <div id="info"></div>
   </div>
@@ -341,10 +342,17 @@ function buildStrip(){
     h+=`<div class="sm" data-i="${k+1}"><span class="no">${no}</span>${esc(p.s)}${bg}</div>`}
   $('strip').innerHTML=h;
   $('strip').onclick=e=>{const t=e.target.closest('.sm');if(t)go(+t.dataset.i)};
+  let moved=false;
   $('strip').addEventListener('scroll',()=>{fadeStrip();
-    if(progScroll)return;clearTimeout(scrollT);
-    scrollT=setTimeout(()=>{if(line)return;const j=Math.max(0,Math.min(N,Math.round($('strip').scrollLeft/80)));if(j!==idx){const old=idx;go(j,false,true)}},110)},{passive:true});
+    if(progScroll||line)return;
+    const j=Math.max(0,Math.min(N,Math.round($('strip').scrollLeft/80)));
+    if(j!==idx){haptic();moved=true;if(timer)stopPlay();go(j,true,true)}
+    clearTimeout(scrollT);scrollT=setTimeout(()=>{if(moved){moved=false;soundFor(idx)}},140)},{passive:true});
 }
+let lastHap=0;
+function haptic(){const n=Date.now();if(n-lastHap<30)return;lastHap=n;
+  try{if(navigator.vibrate){navigator.vibrate(8);return}}catch(e){}
+  try{$('hl').click()}catch(e){}}
 function fadeStrip(){const st=$('strip'),c=st.scrollLeft/80,it=st.children;
   for(let j=0;j<it.length;j++){it[j].style.opacity=Math.max(.2,1-.4*Math.abs(j-c)).toFixed(2)}}
 function centerStrip(i,smooth){const st=$('strip');progScroll=true;clearTimeout(progT);
