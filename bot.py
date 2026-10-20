@@ -463,8 +463,7 @@ def analyse_game(pgn_text, username, engine, limit, extra=None):
                        r["cls"], "X" if r["loss"] < 2 else "O"),
                    int(evals[r["ply"] + 1]["cp"]), r["best_uci"], "|".join(r["tags"]),
                    " ".join(evals[r["ply"]]["pv"]) if (
-                       r["cls"] in ("blunder", "mistake") or r["ply"] in brill
-                       or (r["cls"] == "inaccuracy" and r["color"] == color)) else ""] for r in recs],
+                       r["cls"] in ("blunder", "mistake") or r["ply"] in brill) else ""] for r in recs],
         "key_moments": [{
             "move_no": r["move_no"], "color": "w" if r["color"] == chess.WHITE else "b",
             "san": r["san"], "cls": r["cls"], "best": r["best_san"], "tags": r["tags"],
@@ -790,6 +789,11 @@ def send_viewer(cfg, s, chat=None):
             if len(url) <= 2000:
                 tg_api(cfg, "sendMessage", chat_id=chat, text="📊 Interactive review: board, moves, eval graph",
                        reply_markup={"inline_keyboard": [[{"text": "♟ Open review", "url": url}]]})
+                return
+            if len(url) <= 3500:  # too long for a button, but fine as a link inside the message text
+                tg_api(cfg, "sendMessage", chat_id=chat, parse_mode="HTML", disable_web_page_preview=True,
+                       text=f'📊 <a href="{html.escape(url, quote=True)}">♟ Open the interactive review</a> '
+                            "(board, moves, eval graph)")
                 return
             log.warning("Review link too long (%d chars); sending file", len(url))
     except Exception:
