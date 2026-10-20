@@ -588,15 +588,6 @@ def format_report(s):
     if pos:
         lines += ["", "👍 <b>What went well</b>"] + [f"• {esc(p)}" for p in pos]
 
-    if s["key_moments"]:
-        lines += ["", "⚠️ <b>Key moments</b>"]
-        for k in s["key_moments"]:
-            num = f"{k['move_no']}." if k["color"] == "w" else f"{k['move_no']}..."
-            mark = "??" if k["cls"] == "blunder" else "?"
-            why = f" {esc(', '.join(k['tags']))}." if k["tags"] else ""
-            best = f" Better: <b>{esc(k['best'])}</b>." if k["best"] else ""
-            lines.append(f"• {num} <b>{esc(k['san'])}{mark}</b>{why}{best} ({eval_str(k['before'])} → {eval_str(k['after'])})")
-
     adv = game_advice(s)
     if adv:
         lines += ["", "📚 <b>What to study</b>"] + [f"• {a}" for a in adv]
