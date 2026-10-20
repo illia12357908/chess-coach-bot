@@ -323,7 +323,7 @@ function renderInfo(){
   const p=P[idx-1],k=idx-1,no=Math.floor(k/2)+1,lbl=no+(k%2===0?'. ':'... ')+p.s;
   let h=`<div class="mvtitle"><span class="dot" style="background:${COL[p.c]}"></span>${esc(lbl)} — ${NAME[p.c]}</div><div class="evals">Evaluation ${fmt(cpAt(idx-1))} → ${fmt(p.cp)}</div><div class="why">${explain(k)}</div>`;
   let btns='';
-  if(p.b&&p.b!==p.u&&'BMI'.includes(p.c))btns+=`<button id="bestbtn">${alt?'Back to game':'Show the better move'}</button>`;
+  if(p.b&&p.b!==p.u&&'XOIMB'.includes(p.c))btns+=`<button id="bestbtn">${alt?'Back to game':'Show the better move'}</button>`;
   if(p.pv&&p.pv.length>1)btns+=`<button class="go" id="lineBtn">${p.c==='R'?'Show the idea':'Show the line'}</button>`;
   if(btns)h+=`<div class="btnrow">${btns}</div>`;
   $('info').innerHTML=h;const b=$('bestbtn');if(b)b.onclick=()=>{alt=!alt;render()};
