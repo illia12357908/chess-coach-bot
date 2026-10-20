@@ -1,14 +1,14 @@
 // Chess watcher for Cloudflare Workers (free plan).
-// Runs every minute (Cron Trigger "* * * * *"). If you finished a chess.com game in the last
-// ~100 seconds, it starts the "Chess report bot" workflow on GitHub, which analyses the game
-// and sends the report to Telegram.
+// Runs every minute (Cron Trigger "* * * * *"). If your latest chess.com game has not been reported yet
+// (checked against data/state.json in your repo) and no bot run is already queued or running, it starts the
+// "Chess report bot" workflow on GitHub, which analyses the game and sends the report to Telegram.
 //
 // Variables (Worker -> Settings -> Variables and Secrets):
 //   CHESSCOM_USERNAME  (text)    your chess.com username
 //   GITHUB_REPO        (text)    illia12357908/chess-coach-bot
 //   GITHUB_TOKEN       (secret)  fine-grained GitHub token, only "Actions: Read and write" on that repo
 
-const WINDOW_SECONDS = 1200; // chess.com can publish a finished game minutes late, so look back 20 min (extra runs are harmless)
+const MAX_AGE_SECONDS = 6 * 3600; // never react to games older than this (avoids replaying history)
 
 async function latestGame(user) {
   const opts = { headers: { "User-Agent": `chess-watcher (chess.com user ${user})`, "Cache-Control": "no-cache" } };
@@ -26,15 +26,9 @@ async function latestGame(user) {
   return games.reduce((a, b) => (b.end_time > a.end_time ? b : a));
 }
 
-async function check(env) {
-  const g = await latestGame(env.CHESSCOM_USERNAME);
-  const age = g ? Math.round(Date.now() / 1000 - g.end_time) : null;
-  return { url: g ? g.url : null, age_seconds: age, fresh: age !== null && age >= 0 && age <= WINDOW_SECONDS };
-}
-
-async function dispatch(env) {
-  const r = await fetch(`https://api.github.com/repos/${env.GITHUB_REPO}/actions/workflows/chess-bot.yml/dispatches`, {
-    method: "POST",
+const GH = (env, path, init = {}) =>
+  fetch(`https://api.github.com/repos/${env.GITHUB_REPO}${path}`, {
+    ...init,
     headers: {
       Authorization: `Bearer ${env.GITHUB_TOKEN}`,
       Accept: "application/vnd.github+json",
@@ -42,6 +36,41 @@ async function dispatch(env) {
       "User-Agent": "chess-watcher",
       "Content-Type": "application/json",
     },
+  });
+
+// Is a bot or live run already queued / running? Then it will pick the new game up itself.
+async function botBusy(env) {
+  const r = await GH(env, "/actions/runs?per_page=20");
+  if (!r.ok) throw new Error(`GitHub runs: HTTP ${r.status}`);
+  const runs = (await r.json()).workflow_runs || [];
+  return runs.some((x) => x.status !== "completed" && ["Chess report bot", "Chess live mode"].includes(x.name));
+}
+
+// Has the bot already reported this game? (the bot keeps data/state.json in the repo, which is public)
+async function alreadySeen(env, url) {
+  const r = await fetch(`https://raw.githubusercontent.com/${env.GITHUB_REPO}/main/data/state.json?_=${Date.now()}`, {
+    headers: { "Cache-Control": "no-cache" },
+  });
+  if (!r.ok) return false;
+  const st = await r.json();
+  return Object.prototype.hasOwnProperty.call(st.seen || {}, url);
+}
+
+// Decide what to do. Returns {action, ...details}.
+async function check(env) {
+  const g = await latestGame(env.CHESSCOM_USERNAME);
+  if (!g) return { action: "none", reason: "no games" };
+  const age = Math.round(Date.now() / 1000 - g.end_time);
+  const info = { url: g.url, age_seconds: age };
+  if (age > MAX_AGE_SECONDS) return { action: "none", reason: "latest game is old", ...info };
+  if (await alreadySeen(env, g.url)) return { action: "none", reason: "already reported", ...info };
+  if (await botBusy(env)) return { action: "none", reason: "bot already running or queued", ...info };
+  return { action: "dispatch", reason: "new game", ...info };
+}
+
+async function dispatch(env) {
+  const r = await GH(env, "/actions/workflows/chess-bot.yml/dispatches", {
+    method: "POST",
     body: JSON.stringify({ ref: "main", inputs: { listen_minutes: "0" } }),
   });
   if (r.status !== 204) throw new Error(`GitHub dispatch failed: HTTP ${r.status} ${await r.text()}`);
@@ -53,7 +82,8 @@ export default {
       (async () => {
         try {
           const res = await check(env);
-          if (res.fresh) {
+          console.log("tick:", JSON.stringify(res));
+          if (res.action === "dispatch") {
             await dispatch(env);
             console.log("Started GitHub workflow for", res.url);
           }
@@ -63,8 +93,8 @@ export default {
       })()
     );
   },
-  // Opening the Worker URL in a browser is a safe self-test: it only reads chess.com and never starts anything.
-  // Add ?dispatch=1 to the URL to really start the GitHub workflow once and see GitHub's answer (token test).
+  // Opening the Worker URL shows what the next tick would do (starts nothing).
+  // ?dispatch=1 starts the GitHub workflow once and shows GitHub's answer (token test).
   async fetch(request, env) {
     try {
       if (new URL(request.url).searchParams.get("dispatch") === "1") {
@@ -73,7 +103,7 @@ export default {
       }
       const res = await check(env);
       const config = { user: !!env.CHESSCOM_USERNAME, repo: !!env.GITHUB_REPO, token: !!env.GITHUB_TOKEN };
-      return Response.json({ ok: true, version: "v3-window1200", window_seconds: WINDOW_SECONDS, config, latest_game: res });
+      return Response.json({ ok: true, version: "v4-state-aware", config, decision: res });
     } catch (e) {
       return Response.json({ ok: false, error: String(e) }, { status: 500 });
     }
