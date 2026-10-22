@@ -90,18 +90,29 @@ const LICHESS_THEMES = "fork pin skewer discoveredAttack hangingPiece trappedPie
   "advantage crushing opening middlegame quietMove zugzwang promotion exposedKing interference clearance";
 
 function systemPrompt(env, context) {
-  return `You are a friendly, concrete chess coach talking to ${env.CHESSCOM_USERNAME} in a Telegram chat. \
-Answer in the language the user writes in (usually Russian). Keep answers short: usually under 150 words, plain text only, no markdown, no tables. \
-Below is the player's real data from chess.com games analysed by Stockfish (win-probability based accuracy; blunder >=20% win-chance loss, mistake >=10%, inaccuracy >=5%). \
-Use it: refer to the concrete games, openings, moves and recurring error tags. If the data does not contain the answer (for example a move you cannot see), say so and do not invent moves or positions.
+  return `You are the personal chess coach of ${env.CHESSCOM_USERNAME}, talking in a Telegram chat. You coach like a good human trainer, not like a generic assistant.
 
-Lichess links (always use exactly these forms, never invent other URLs, puzzle ids or study ids):
+STYLE
+- Answer in the language the player writes in (usually Russian). Plain text only, no markdown, no tables. Usually under 150 words; go longer only when the player asks for a full explanation.
+- Be direct and specific: name the game, the move number and the move. Say what happened, why it happened, and what to do about it. Praise only what the data really shows.
+- Give ONE main lesson and ONE concrete drill per answer, not a list of ten tips. Ask at most one clarifying question, and only if you truly need it.
+
+HOW TO COACH
+- Find the pattern before the symptom: look across games for the repeated cause (hanging pieces, missed tactics, collapses after a good opening, time trouble in bullet/blitz, one weak opening). Separate tactical oversights from strategic or opening problems and treat them differently.
+- Match advice to the level (see ratings): at this level the biggest gains come from blunder checks, not losing won positions, simple solid openings and clock use, not from deep theory.
+- Opening advice: choose lines that fit the colour, the openings already in the data and the mistakes found. Give 6-10 moves, the main plan in one sentence and the typical trap or mistake to avoid.
+
+HONESTY (very important)
+- The Stockfish evaluations and the "better" moves in the data are the ground truth. Never call a move good or bad against them. Evaluations are in pawns from White's point of view.
+- You cannot calculate chess reliably in your head. Do not invent variations, tactics or positions. If you want to explain why a move is bad and the data only says what the engine prefers, say "Stockfish prefers X" and give the idea only if it is simple and certain (for example a piece is left hanging).
+- To see the moves of a game, call the get_game tool (game 1 is the latest). Use it whenever the player asks about a particular game or move, or before explaining a mistake. If the player asks about something not in the data, say so.
+
+LICHESS LINKS (use exactly these forms; never invent other URLs, puzzle ids or study ids)
 - Puzzles by theme: https://lichess.org/training/<theme>, theme is one of: ${LICHESS_THEMES}. Daily puzzle: https://lichess.org/training/daily
-- Opening line on an analysis board: https://lichess.org/analysis/pgn/<moves in SAN joined by underscores>, for example https://lichess.org/analysis/pgn/e4_c5_Nf3_d6_d4_cxd4_Nxd4_Nf6_Nc3_a6. Only give move sequences you are sure are correct theory.
-On that analysis page the player can open the Explorer tab to see how masters play the line.
-When asked for a new opening: pick one that fits the player's colour, style and the mistakes in the data, name it, give the first 6-10 moves, one-sentence plan, and the analysis link. When asked for weak spots: rank 2-3 from the data with numbers. When asked for puzzles: map weaknesses to 2-4 themes and give training links.
+- Opening line on an analysis board: https://lichess.org/analysis/pgn/<moves in SAN joined by underscores>, for example https://lichess.org/analysis/pgn/e4_c5_Nf3_d6_d4_cxd4_Nxd4_Nf6_Nc3_a6. Only give move sequences you are sure are correct theory. The player can open the Explorer tab on that page to see how others play the line.
+- Map weaknesses to 2-4 puzzle themes when asked for puzzles.
 
-PLAYER DATA
+PLAYER DATA (accuracy is win-probability based; blunder >=20% win-chance loss, mistake >=10%, inaccuracy >=5%; "key" lists the worst moves)
 ${context}`;
 }
 
@@ -130,7 +141,7 @@ async function playerContext(env) {
   for (const g of games) for (const [k, v] of Object.entries(g.tags || {})) tagTotals[k] = (tagTotals[k] || 0) + v;
   const wins = games.filter((g) => g.outcome === "win").length;
   const head = `Games: ${games.length} (newest first), wins ${wins}, average accuracy ${avg}. Error tags over all games: ${JSON.stringify(tagTotals)}.\n`;
-  return head + games.map((g, i) => `${i === 0 ? "[latest] " : ""}${compactGame(g)}`).join("\n");
+  return head + games.map((g, i) => `#${i + 1}${i === 0 ? " (latest)" : ""}: ${compactGame(g)}`).join("\n");
 }
 
 async function tg(env, method, body) {
@@ -142,22 +153,58 @@ async function tg(env, method, body) {
   return r.json().catch(() => ({}));
 }
 
+const TOOLS = [{
+  name: "get_game",
+  description: "Full move list of one analysed game with Stockfish evaluation after every move (pawns, White's view), marks (?? blunder, ? mistake, ?! inaccuracy, !! brilliant) and the better move for errors. game_number 1 = latest game, 2 = the one before, and so on (same numbers as in the player data).",
+  input_schema: { type: "object", properties: { game_number: { type: "integer", minimum: 1, maximum: 30 } }, required: ["game_number"] },
+}];
+
+async function loadGames(env) {
+  const r = await fetch(`https://raw.githubusercontent.com/${env.GITHUB_REPO}/main/data/state.json?_=${Date.now()}`, { headers: { "Cache-Control": "no-cache" } });
+  if (!r.ok) return [];
+  const st = await r.json();
+  return Object.values(st.games || {}).sort((a, b) => b.end_time - a.end_time).slice(0, 30);
+}
+
+async function runTool(env, name, input) {
+  if (name !== "get_game") return "unknown tool";
+  const g = (await loadGames(env))[(input.game_number || 1) - 1];
+  if (!g) return "no such game";
+  if (!g.review) return "The full move list of this game is not stored (only the 60 most recent games have it). Use the summary line from the player data.";
+  return `${g.color === "white" ? "Player had White" : "Player had Black"}, ${g.outcome}, opening ${g.opening}. Moves:\n${g.review}`;
+}
+
 async function askCoach(env, question, replyTo) {
   const context = await playerContext(env);
   const content = replyTo ? `(In reply to this earlier message of yours: """${replyTo.slice(0, 1500)}""")\n\n${question}` : question;
-  const r = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-    body: JSON.stringify({
-      model: env.ANTHROPIC_MODEL || "claude-sonnet-5-5",
-      max_tokens: 800,
-      system: systemPrompt(env, context),
-      messages: [{ role: "user", content }],
-    }),
-  });
-  if (!r.ok) throw new Error(`Anthropic HTTP ${r.status}: ${(await r.text()).slice(0, 300)}`);
-  const j = await r.json();
-  return (j.content || []).map((b) => b.text || "").join("").trim() || "(empty answer)";
+  const messages = [{ role: "user", content }];
+  for (let step = 0; step < 5; step++) {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify({
+        model: env.ANTHROPIC_MODEL || "claude-sonnet-5-5",
+        max_tokens: 1000,
+        system: systemPrompt(env, context),
+        tools: TOOLS,
+        messages,
+      }),
+    });
+    if (!r.ok) throw new Error(`Anthropic HTTP ${r.status}: ${(await r.text()).slice(0, 300)}`);
+    const j = await r.json();
+    if (j.stop_reason !== "tool_use") {
+      return (j.content || []).map((b) => b.text || "").join("").trim() || "(empty answer)";
+    }
+    messages.push({ role: "assistant", content: j.content });
+    const results = [];
+    for (const b of j.content.filter((x) => x.type === "tool_use")) {
+      let out;
+      try { out = await runTool(env, b.name, b.input || {}); } catch (e) { out = "tool error: " + String(e); }
+      results.push({ type: "tool_result", tool_use_id: b.id, content: String(out).slice(0, 12000) });
+    }
+    messages.push({ role: "user", content: results });
+  }
+  return "Не удалось собрать ответ, попробуй переформулировать вопрос.";
 }
 
 // Buttons and /commands need Stockfish, so they go to the GitHub workflow "Chess action".
@@ -262,7 +309,7 @@ export default {
       const res = await check(env);
       const config = { user: !!env.CHESSCOM_USERNAME, repo: !!env.GITHUB_REPO, token: !!env.GITHUB_TOKEN,
         chat: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID && env.ANTHROPIC_API_KEY && env.TG_WEBHOOK_SECRET) };
-      return Response.json({ ok: true, version: "v5-chat", config, decision: res });
+      return Response.json({ ok: true, version: "v6-coach", config, decision: res });
     } catch (e) {
       return Response.json({ ok: false, error: String(e) }, { status: 500 });
     }

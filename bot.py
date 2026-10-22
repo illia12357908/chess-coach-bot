@@ -121,6 +121,9 @@ class State:
             log.info("State belongs to another user, starting fresh")
             self.data = {"seen": {}, "games": {}, "tg_offset": 0, "last_digest": ""}
         self.data["username"] = owner
+        for g in self.data["games"].values():  # games analysed before the chat coach existed
+            if g.get("plies") and not g.get("review"):
+                g["review"] = build_review(g["plies"])
 
     def save(self):
         games = self.data["games"]
@@ -128,6 +131,7 @@ class State:
         for u in games:
             if u not in keep:
                 games[u].pop("plies", None)
+                games[u].pop("review", None)
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(self.data, separators=(",", ":")))
         tmp.replace(self.path)
@@ -288,6 +292,27 @@ def analyse_position(engine, board, limit):
             "pv": [m.uci() for m in pv[:10]]}
 
 
+def build_review(plies):
+    """Readable move list for the chat coach: SAN, mark, Stockfish eval after the move (pawns, White's view) and the better move."""
+    board = chess.Board()
+    out = []
+    for i, p in enumerate(plies):
+        uci, cls, cp, best = p[0], p[1], p[2], p[3]
+        try:
+            mv = chess.Move.from_uci(uci)
+            san = board.san(mv)
+            better = board.san(chess.Move.from_uci(best)) if best and best != uci else ""
+            board.push(mv)
+        except Exception:
+            break
+        mark = {"B": "??", "M": "?", "I": "?!", "R": "!!"}.get(cls, "")
+        txt = f"{i // 2 + 1}{'.' if i % 2 == 0 else '...'}{san}{mark}[{cp / 100:+.1f}]"
+        if cls in ("B", "M", "I") and better:
+            txt += f"(better {better})"
+        out.append(txt)
+    return " ".join(out)
+
+
 def analyse_game(pgn_text, username, engine, limit, extra=None):
     extra = extra or {}
     game = chess.pgn.read_game(io.StringIO(pgn_text))
@@ -432,7 +457,7 @@ def analyse_game(pgn_text, username, engine, limit, extra=None):
             brill.add(i)
     my_brilliants = [{"move_no": r["move_no"], "san": r["san"]} for r in mine if r["ply"] in brill]
 
-    return {
+    result = {
         "brilliants": my_brilliants,
         "url": extra.get("url") or h.get("Link", ""),
         "end_time": extra.get("end_time") or int(time.time()),
@@ -471,6 +496,8 @@ def analyse_game(pgn_text, username, engine, limit, extra=None):
             "before": r["cp_before"], "after": r["cp_after"], "phase": r["phase"],
         } for r in top],
     }
+    result["review"] = build_review(result["plies"])
+    return result
 
 
 # --------------------------------------------------------------------------- advice
