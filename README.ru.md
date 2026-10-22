@@ -16,3 +16,9 @@
 6. **Settings → Pages → Deploy from a branch → `main` → `/docs` → Save.** Тогда интерактивный разбор открывается ссылкой.
 
 Дальше всё само. Для разбора через ~минуту после партии подключи бесплатный Cloudflare Worker (см. английский README, раздел *Instant reports*).
+
+## Чат с тренером (по желанию)
+
+Можно писать боту обычным текстом («почему я слил эту партию?», «дай новый дебют», «какие у меня слабые места?», «дай пазлы») — отвечает Claude по данным твоих разобранных партий и даёт ссылки на lichess.
+
+Нужно в Cloudflare Worker (Settings → Variables and Secrets): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `ANTHROPIC_API_KEY`, `TG_WEBHOOK_SECRET` (любая случайная строка). Затем один раз открыть `https://<твой-worker>.workers.dev/setup` — это подключит вебхук. Кнопки меню и команды `/latest`, `/week` при этом обрабатывает workflow «Chess action». Отключить: `/setup?off=1`.

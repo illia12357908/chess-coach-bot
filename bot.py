@@ -904,7 +904,7 @@ def probe(cfg, state):
         work = True  # first run
     elif any(g["url"] not in state.data["seen"] for g in games):
         work = True
-    if not work:
+    if not work and not webhook_active(cfg):
         res = tg_api(cfg, "getUpdates", offset=state.data["tg_offset"], timeout=0,
                      allowed_updates=["message", "callback_query"])
         work = bool(res.get("result"))
@@ -1019,41 +1019,62 @@ def do_action(cfg, state, data, chat, msg_id=None, msg_text=""):
             tg_send(cfg, "Game not found (too old?).", chat)
 
 
+def webhook_active(cfg):
+    """With a Telegram webhook set (the Cloudflare chat worker), getUpdates is not allowed: the worker forwards updates instead."""
+    now = time.time()
+    if now - getattr(cfg, "_wh_checked", 0) > 300:
+        try:
+            cfg._wh_url = tg_api(cfg, "getWebhookInfo").get("result", {}).get("url", "")
+        except Exception:
+            cfg._wh_url = ""
+        cfg._wh_checked = now
+    return bool(getattr(cfg, "_wh_url", ""))
+
+
+def process_update(cfg, state, u):
+    """Handle one Telegram update (a button press or a /command). Returns True if it did something."""
+    state.data["tg_offset"] = max(state.data.get("tg_offset", 0), u.get("update_id", -1) + 1)
+    action, msg_id, msg_text = None, None, ""
+    if "callback_query" in u:
+        cq = u["callback_query"]
+        msg = cq.get("message") or {}
+        chat = str(msg.get("chat", {}).get("id", ""))
+        if chat != cfg.tg_chat:
+            return False
+        try:
+            tg_api(cfg, "answerCallbackQuery", callback_query_id=cq["id"])
+        except Exception:
+            pass  # already acknowledged, or an old button press
+        action, msg_id, msg_text = cq.get("data", ""), msg.get("message_id"), msg.get("text", "")
+    else:
+        msg = u.get("message") or {}
+        chat = str(msg.get("chat", {}).get("id", ""))
+        if chat != cfg.tg_chat:
+            return False
+        words = (msg.get("text") or "").strip().lower().split()
+        if words and words[0].startswith("/"):
+            action = CMD.get(words[0].split("@")[0])
+    if not action:
+        return False
+    try:
+        do_action(cfg, state, action, chat, msg_id, msg_text)
+    except Exception:
+        log.exception("Action %s failed", action)
+        tg_send(cfg, "Something went wrong, check the logs.")
+    state.save()
+    return True
+
+
 def handle_updates(cfg, state, timeout):
+    if webhook_active(cfg):
+        return 0
     handled = 0
     res = tg_api(cfg, "getUpdates", offset=state.data["tg_offset"], timeout=timeout,
                  allowed_updates=["message", "callback_query"])
     for u in res.get("result", []):
         state.data["tg_offset"] = u["update_id"] + 1
-        action, msg_id, msg_text = None, None, ""
-        if "callback_query" in u:
-            cq = u["callback_query"]
-            msg = cq.get("message") or {}
-            chat = str(msg.get("chat", {}).get("id", ""))
-            if chat != cfg.tg_chat:
-                continue
-            try:
-                tg_api(cfg, "answerCallbackQuery", callback_query_id=cq["id"])
-            except Exception:
-                pass  # old button presses can no longer be acknowledged
-            action, msg_id, msg_text = cq.get("data", ""), msg.get("message_id"), msg.get("text", "")
-        else:
-            msg = u.get("message") or {}
-            chat = str(msg.get("chat", {}).get("id", ""))
-            if chat != cfg.tg_chat:
-                continue
-            words = (msg.get("text") or "").strip().lower().split()
-            if words and words[0].startswith("/"):
-                action = CMD.get(words[0].split("@")[0])
-        if not action:
-            continue
-        handled += 1
-        try:
-            do_action(cfg, state, action, chat, msg_id, msg_text)
-        except Exception:
-            log.exception("Action %s failed", action)
-            tg_send(cfg, "Something went wrong, check the logs.")
-        state.save()
+        if process_update(cfg, state, u):
+            handled += 1
     state.save()
     return handled
 
@@ -1163,6 +1184,7 @@ def main():
     ap.add_argument("--idle", type=float, default=0,
                     help="with --watch: stop after N minutes without new games or button presses")
     ap.add_argument("--quiet", action="store_true", help="with --watch: no start/stop messages")
+    ap.add_argument("--update", help="handle one Telegram update (JSON), forwarded by the Cloudflare chat worker")
     ap.add_argument("--listen", type=float, default=0,
                     help="after the check, stay online N minutes answering button presses")
     args = ap.parse_args()
@@ -1199,6 +1221,10 @@ def main():
         tg_api(cfg, "setMyCommands", commands=[{"command": c, "description": d} for c, d in BOT_COMMANDS])
     except Exception:
         log.warning("Could not register bot commands")
+    if args.update:
+        process_update(cfg, state, json.loads(args.update))
+        state.save()
+        return
     if args.watch > 0:
         run_watch(cfg, state, args.watch, idle=args.idle, quiet=args.quiet)
         return

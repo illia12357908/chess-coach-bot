@@ -45,3 +45,9 @@ GitHub's own schedule is slow (5–15 minutes). The free **Cloudflare Worker** i
 - Run locally: `pip install -r requirements.txt`, install Stockfish, copy `.env.example` to `.env`, `python bot.py`.
 
 License: MIT (see LICENSE for third-party notes).
+
+## Chat with the coach (optional)
+
+Write to the bot in plain text ("why did I lose this?", "give me a new opening", "what are my weak spots?", "give me puzzles") and Claude answers from your analysed games, with lichess links.
+
+Add `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `ANTHROPIC_API_KEY` and `TG_WEBHOOK_SECRET` (any random string) to the Cloudflare Worker, paste `cloudflare/worker.js`, then open `https://<your-worker>.workers.dev/setup` once to connect the Telegram webhook. Menu buttons and `/commands` are then handled by the "Chess action" workflow. Undo with `/setup?off=1`.
