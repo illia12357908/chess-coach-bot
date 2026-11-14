@@ -83,6 +83,19 @@ h2{margin:0 0 8px;font-size:15px;font-weight:700;color:var(--tx)}
 #momnav button.go{background:var(--acc);color:#10200a;font-weight:700}
 button:focus-visible,.mv:focus-visible,.km:focus-visible,.sm:focus-visible{outline:2px solid #8cb4ff;outline-offset:2px}
 .km{min-height:44px}
+#coach{display:flex;gap:10px;align-items:flex-start;margin-bottom:10px}
+#avatar{flex:none;width:76px;height:76px;border-radius:50%;background:var(--panel2);box-shadow:0 0 0 3px var(--ring,#7fb34a);transition:box-shadow .25s}
+#avatar svg{width:100%;height:100%;display:block;border-radius:50%}
+#avatar.talk #head{animation:bob .28s ease-in-out infinite alternate}
+@keyframes bob{from{transform:translateY(0)}to{transform:translateY(1.6px)}}
+.eye{transform-box:fill-box;transform-origin:center;animation:blink 4.6s infinite}
+@keyframes blink{0%,94%,100%{transform:scaleY(1)}97%{transform:scaleY(.1)}}
+#bubble{position:relative;flex:1;min-width:0;min-height:76px;background:var(--panel2);border-radius:14px;padding:9px 12px;font-size:14.5px;line-height:1.4;display:flex;align-items:center}
+#bubble:before{content:"";position:absolute;left:-7px;top:26px;border:8px solid transparent;border-right-color:var(--panel2);border-left:0}
+#bubble.pop{animation:pop .22s ease-out}
+@keyframes pop{from{transform:scale(.96);opacity:.4}to{transform:scale(1);opacity:1}}
+#bubble b{color:#fff}
+@media(prefers-reduced-motion:reduce){#avatar.talk #head,.eye,#bubble.pop{animation:none!important}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
 </style></head><body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>__PIECES__</defs></svg>
@@ -94,6 +107,21 @@ button:focus-visible,.mv:focus-visible,.km:focus-visible,.sm:focus-visible{outli
  </div>
  <div>
   <div class="card">
+   <div id="coach"><div id="avatar"><svg viewBox="0 0 100 100" aria-hidden="true">
+     <rect width="100" height="100" fill="#3a4a5c"/>
+     <g id="head">
+      <path d="M18 100c2-20 16-26 32-26s30 6 32 26z" fill="#2f6f4e"/>
+      <path d="M43 74h14v9c0 3-14 3-14 0z" fill="#e7b98e"/>
+      <ellipse cx="50" cy="50" rx="25" ry="28" fill="#f0c9a0"/>
+      <ellipse cx="25.5" cy="52" rx="4" ry="6" fill="#e7b98e"/><ellipse cx="74.5" cy="52" rx="4" ry="6" fill="#e7b98e"/>
+      <path d="M24 46c-2-22 12-30 27-30s28 8 25 30c-3-9-8-14-14-16-9 5-22 5-30 2-5 3-8 8-8 14z" fill="#3b2a20"/>
+      <g fill="none" stroke="#2b2b2b" stroke-width="2.2"><circle cx="39" cy="50" r="8.5"/><circle cx="61" cy="50" r="8.5"/><path d="M47.5 49.5q2.5-2 5 0"/></g>
+      <ellipse class="eye" cx="39" cy="50" rx="2.6" ry="3" fill="#222"/><ellipse class="eye" cx="61" cy="50" rx="2.6" ry="3" fill="#222"/>
+      <path id="brL" d="M31 38q8-4 15 0" fill="none" stroke="#3b2a20" stroke-width="2.6" stroke-linecap="round"/>
+      <path id="brR" d="M54 38q8-4 15 0" fill="none" stroke="#3b2a20" stroke-width="2.6" stroke-linecap="round"/>
+      <path id="mouth" d="M41 66q9 7 18 0" fill="none" stroke="#7a2f2f" stroke-width="2.6" stroke-linecap="round"/>
+     </g></svg></div>
+    <div id="bubble" aria-live="polite"></div></div>
    <div class="boardrow"><div id="evalbar"><div id="evalfill"></div></div><svg id="board" viewBox="-56 0 856 860"></svg></div>
    <div class="ctrl"><button id="bFirst" title="Start"></button><button id="bPrev" title="Back"></button><button id="bPlay" title="Play review (stops at key moments)"></button><button id="bNext" title="Forward"></button><button id="bLast" title="End"></button><button id="bFlip" title="Flip board"></button><button id="bSnd" title="Sound on/off"></button></div>
    <label id="hl" style="position:fixed;left:-200px;top:0;opacity:0;pointer-events:none" aria-hidden="true"><input type="checkbox" switch id="hs"></label>
@@ -196,24 +224,29 @@ function arrow(u,color){
   return `<line x1="${a[0]+ux*8}" y1="${a[1]+uy*8}" x2="${hx}" y2="${hy}" stroke="${color}" stroke-width="18" stroke-linecap="round" opacity=".85"/>`+
    `<polygon points="${b[0]-ux*4},${b[1]-uy*4} ${hx-uy*30},${hy+ux*30} ${hx+uy*30},${hy-ux*30}" fill="${color}" opacity=".9"/>`;
 }
-// ---- sound (synthesised, no files) ----
-let AC=null,muted=false;try{muted=localStorage.getItem('chessMute')==='1'}catch(e){}
+// ---- sound: recorded piece sounds (embedded), wood-like synthesis as fallback ----
+const SB=__SOUNDS__;
+let AC=null,muted=false,bufs={},sampling=false;try{muted=localStorage.getItem('chessMute')==='1'}catch(e){}
+function ensureAC(){try{AC=AC||new(window.AudioContext||window.webkitAudioContext)();if(AC.state==='suspended')AC.resume();
+  if(!sampling){sampling=true;for(const k in SB){try{const bin=atob(SB[k]),u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);
+    AC.decodeAudioData(u.buffer,b=>{bufs[k]=b},()=>{})}catch(e){}}}}catch(e){}return AC}
+['pointerdown','touchstart','keydown'].forEach(ev=>window.addEventListener(ev,()=>{if(!muted)ensureAC()},{passive:true}));
+function smp(name,t0,vol,rate){const s=AC.createBufferSource();s.buffer=bufs[name];s.playbackRate.value=rate||1;
+  const g=AC.createGain();g.gain.value=vol;s.connect(g).connect(AC.destination);s.start(AC.currentTime+(t0||0))}
 function tone(f,t0,dur,vol,type){const c=AC,o=c.createOscillator(),g=c.createGain();o.type=type||'sine';o.frequency.value=f;
-  g.gain.setValueAtTime(0.0001,c.currentTime+t0);g.gain.exponentialRampToValueAtTime(vol,c.currentTime+t0+0.005);
+  g.gain.setValueAtTime(0.0001,c.currentTime+t0);g.gain.exponentialRampToValueAtTime(vol,c.currentTime+t0+0.004);
   g.gain.exponentialRampToValueAtTime(0.0001,c.currentTime+t0+dur);o.connect(g).connect(c.destination);o.start(c.currentTime+t0);o.stop(c.currentTime+t0+dur+0.02)}
-function click(t0,vol,freq){const c=AC,n=Math.floor(c.sampleRate*0.05),buf=c.createBuffer(1,n,c.sampleRate),d=buf.getChannelData(0);
-  for(let i=0;i<n;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/n,3);
-  const s=c.createBufferSource();s.buffer=buf;const f=c.createBiquadFilter();f.type='bandpass';f.frequency.value=freq;f.Q.value=1.2;
-  const g=c.createGain();g.gain.value=vol;s.connect(f).connect(g).connect(c.destination);s.start(c.currentTime+t0)}
-function snd(kind){if(muted)return;try{AC=AC||new(window.AudioContext||window.webkitAudioContext)();if(AC.state==='suspended')AC.resume();
-  if(kind==='move'){click(0,1.6,900);tone(180,0,0.06,0.25)}
-  else if(kind==='capture'){click(0,2.4,700);tone(130,0,0.09,0.4);click(0.03,1.2,1500)}
-  else if(kind==='castle'){click(0,1.6,900);click(0.11,1.8,800);tone(170,0.11,0.06,0.25)}
-  else if(kind==='check'){click(0,2,800);tone(660,0.02,0.18,0.18,'triangle')}
-  else if(kind==='end'){tone(523,0,0.25,0.2,'triangle');tone(392,0.18,0.35,0.2,'triangle')}
-  }catch(e){}}
+// fallback: a few damped wood-like resonances, no noise (so no hiss)
+function wood(t0,vol,base){const m=[[1,1,.05],[2.35,.55,.032],[4.4,.3,.02],[7.6,.15,.012]];for(const [r,a,d] of m)tone(base*r,t0,d,vol*a*0.5,'sine')}
+function snd(kind){if(muted)return;if(!ensureAC())return;const have=!!bufs.move,rate=0.95+Math.random()*0.1;
+  if(kind==='move'){have?smp('move',0,1,rate):wood(0,1,300)}
+  else if(kind==='capture'){have&&bufs.capture?smp('capture',0,1,rate):(wood(0,1.3,250),wood(0.03,.8,420))}
+  else if(kind==='castle'){if(have){smp('move',0,1,rate);smp('move',0.13,.9,rate*1.04)}else{wood(0,1,300);wood(0.12,1,330)}}
+  else if(kind==='check'){have?(bufs.capture?smp('capture',0,1,rate):smp('move',0,1,rate)):wood(0,1.3,280);tone(880,0.05,0.22,0.1,'triangle')}
+  else if(kind==='end'){bufs.ok?smp('ok',0,.9,1):(tone(523,0,0.25,0.2,'triangle'),tone(392,0.18,0.35,0.2,'triangle'))}
+  else if(kind==='brilliant'){bufs.ok?smp('ok',0,.9,1.12):tone(988,0,0.3,0.2,'triangle')}}
 function sndSan(sn,last){if(last)snd('end');else if(/[+#]$/.test(sn))snd('check');else if(/^O-O/.test(sn))snd('castle');else if(sn.includes('x'))snd('capture');else snd('move')}
-function soundFor(i){if(i<=0)return;sndSan(P[i-1].s,i===N)}
+function soundFor(i){if(i<=0)return;sndSan(P[i-1].s,i===N);if(P[i-1].c==='R')setTimeout(()=>snd('brilliant'),260)}
 const IC={
  first:'<svg viewBox="0 0 24 24"><path d="M6 5h2.4v14H6zM19 5v14L9.5 12z"/></svg>',
  prev:'<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" style="fill:none;stroke:currentColor;stroke-width:2.8;stroke-linecap:round;stroke-linejoin:round"/></svg>',
@@ -296,14 +329,63 @@ function keyInfo(k){
     else if(tg.includes('missed tactic'))d='Missed a tactic. '+d;
     if(bestSan)d+=` Better: ${bestSan}.`;
     return{col:COL[p.c],sym:SYM[p.c],lab,name:NAME[p.c],d}}
-  if(!mine&&p.c==='B'){
+  if(!mine&&(p.c==='B'||p.c==='M')){
     const nx=P[k+1];
-    if(nx&&(nx.c==='T'||nx.c==='X'||nx.c==='R'))return{col:'#6aa84f',sym:'\u2713',lab,name:'Opponent blunder',d:'They blundered and you took advantage of it.'};
+    if(nx&&(nx.c==='T'||nx.c==='X'||nx.c==='R'))return{col:'#6aa84f',sym:'\u2713',lab,name:p.c==='B'?'Opponent blunder':'Opponent mistake',d:(p.c==='B'?'They blundered':'They made a mistake')+' and you took advantage of it.'};
     const nb=nx&&nx.b&&nx.b!==nx.u?sanOf(boards[k+1],nx.b):'';
-    return{col:'#3b82c4',sym:'!',lab,name:'Chance',d:'They blundered here. You could have gained a big advantage'+(nb?` with ${nb}`:'')+'.'}}
+    return{col:'#3b82c4',sym:'!',lab,name:'Chance',d:(p.c==='B'?'They blundered here. ':'They made a mistake here. ')+'You could have gained a big advantage'+(nb?` with ${nb}`:'')+'.'}}
   return null}
 const KI=P.map((_,k)=>keyInfo(k));
 const isKey=k=>!!KI[k];
+// ---- coach: avatar with a speech bubble ----
+const MOUTH={smile:['M41 66q9 7 18 0',0],flat:['M42 68h16',0],o1:['M42 65q8 11 16 0z',1],o2:['M40 64q10 17 20 0z',1],wow:['M45 64q5 15 10 0q-5-5-10 0z',1]};
+const BROWS={n:['M31 38q8-4 15 0','M54 38q8-4 15 0'],up:['M31 34q8-5 15 0','M54 34q8-5 15 0'],worry:['M31 41l15-5','M54 36l15 5'],happy:['M31 36q8-5 15 0','M54 36q8-5 15 0']};
+const MOODS={n:{ring:'#7fb34a',m:'smile',b:'n'},good:{ring:'#7fb34a',m:'smile',b:'happy'},bad:{ring:'#e5483f',m:'flat',b:'worry'},wow:{ring:'#1baca6',m:'wow',b:'up'},tip:{ring:'#3b82c4',m:'smile',b:'up'}};
+let mouthT=null,curMood='n';
+function setMouth(k){const m=MOUTH[k];const el=$('mouth');el.setAttribute('d',m[0]);el.setAttribute('fill',m[1]?'#7a2f2f':'none')}
+function setMood(name){curMood=name;const md=MOODS[name]||MOODS.n;$('avatar').style.setProperty('--ring',md.ring);setMouth(md.m);$('brL').setAttribute('d',BROWS[md.b][0]);$('brR').setAttribute('d',BROWS[md.b][1])}
+function talk(ms){clearInterval(mouthT);const av=$('avatar');
+  if(matchMedia('(prefers-reduced-motion:reduce)').matches){return}
+  av.classList.add('talk');let i=0,t0=Date.now();const seq=['o1','o2','flat','o2','o1','smile'];
+  mouthT=setInterval(()=>{if(Date.now()-t0>ms){clearInterval(mouthT);av.classList.remove('talk');setMood(curMood);return}setMouth(seq[i++%seq.length])},120)}
+let lastSay='';
+function say(html,mood,ms){if(html===lastSay)return;lastSay=html;const b=$('bubble');b.innerHTML='<div>'+html+'</div>';b.classList.remove('pop');void b.offsetWidth;b.classList.add('pop');
+  setMood(mood||'n');talk(ms||Math.min(3200,Math.max(500,html.length*28)))}
+const POOL={
+ mT:['That is the engine’s top choice. Well found.','Best move. Spot on.','Exactly right.'],
+ mX:['Excellent, almost the very best.','Very accurate.','A strong move.'],
+ mO:['A solid move.','Good, keeps things under control.','Fine. Nothing to worry about.'],
+ mI:['A small inaccuracy, nothing serious.','Slightly imprecise.','Not the sharpest, but OK.'],
+ oT:['They found the best move.','Accurate reply from your opponent.','That is the move I would have played too.'],
+ oX:['A strong reply.','They are playing well here.','Good move by your opponent.'],
+ oO:['A normal move.','Solid, nothing special.','They keep it simple.'],
+ oI:['A small inaccuracy from your opponent.','They let a little slip.','Slightly imprecise by them.']};
+function pickFrom(arr,k){return arr[k%arr.length]}
+const PNAME={p:'pawn',n:'knight',b:'bishop',r:'rook',q:'queen'};
+function eventNote(k){const p=P[k],pre=boards[k],[f1,r1]=sq(p.u.slice(0,2)),[f2,r2]=sq(p.u.slice(2,4)),pc=pre[r1][f1],tg=pre[r2][f2];
+  let n='';
+  if(pc&&pc.toLowerCase()==='k'&&Math.abs(f2-f1)===2)n='Castles to safety. ';
+  else if(tg&&PNAME[tg.toLowerCase()]&&tg.toLowerCase()!=='p')n=`Takes the ${PNAME[tg.toLowerCase()]}. `;
+  if(p.u.length>4)n+='Promotes! ';
+  if(/[+#]$/.test(p.s))n+=/#$/.test(p.s)?'Checkmate. ':'Check. ';
+  return n}
+function coachLine(k){
+  const p=P[k],mine=(k%2===mineSide),q=KI[k],ev=eventNote(k);
+  if(q){
+    if(q.name==='Brilliant')return{t:`<b>Brilliant, ${esc(q.lab)}!</b> You gave up material for something bigger. Press “Show the idea” to see why it works.`,m:'wow',ms:3200};
+    if(q.name==='Opponent blunder'||q.name==='Opponent mistake')return{t:`They slipped with <b>${esc(q.lab)}</b>, and you punished it. Nice!`,m:'good',ms:2400};
+    if(q.name==='Chance')return{t:`They went wrong with <b>${esc(q.lab)}</b>. ${esc(q.d.replace(/^They (blundered|made a mistake) here\. /,''))}`,m:'tip',ms:3200};
+    return{t:`<b>${esc(q.lab)} is a ${q.name.toLowerCase()}.</b> ${esc(q.d)}`,m:'bad',ms:3400}}
+  const cls=p.c==='R'?'T':p.c,pool=(mine?'m':'o')+cls;
+  if(POOL[pool])return{t:ev+pickFrom(POOL[pool],k),m:(mine&&(cls==='T'||cls==='X'))?'good':'n',ms:900};
+  return{t:ev||'Let’s see.',m:'n',ms:600}}
+function coachIntro(){
+  const me=M.me==='white'?M.white:M.black;
+  say(`Hi ${esc(me)}! I will walk you through this game and stop at the moments that decided it. Press play to start.`,'good',2600)}
+function coachEnd(){
+  const out=M.outcome==='win'?'You won this one':M.outcome==='loss'?'You lost this one':'A draw';
+  say(`${out}. Your accuracy was ${M.acc_me}. Tap a key moment below to go back and see what could be improved.`,M.outcome==='loss'?'tip':'good',2800)}
+function coachFor(i){if(i<=0){coachIntro();return}if(i>=N&&!KI[N-1]){coachEnd();return}const c=coachLine(i-1);say(c.t,c.m,c.ms)}
 function renderInfo(){
   if(line){
     const k=line.k,no=Math.floor(k/2)+1,mineMv=(k%2===mineSide),pc=pctFor(k,cpAt(k));
@@ -319,7 +401,7 @@ function renderInfo(){
     $('lnPlay').onclick=()=>{if(timer)stopPlay();else{line.i=0;render();playLine()}};
     $('lnBack').onclick=exitLine;
     return}
-  if(idx===0){$('info').innerHTML=`<div class="mvtitle">Start of the game</div><div class="why" style="color:var(--mut)">Press <b>Next key moment</b> for a guided tour of the turning points, or step through with ▶ and the arrow keys.</div>`;return}
+  if(idx===0){$('info').innerHTML=`<div class="mvtitle">Start of the game</div><div class="why" style="color:var(--mut)">Press play for a guided tour that stops at the turning points, or step through with the arrow buttons or keys.</div>`;return}
   const p=P[idx-1],k=idx-1,no=Math.floor(k/2)+1,lbl=no+(k%2===0?'. ':'... ')+p.s;
   let h=`<div class="mvtitle"><span class="dot" style="background:${COL[p.c]}"></span>${esc(lbl)} — ${NAME[p.c]}</div><div class="evals">Evaluation ${fmt(cpAt(idx-1))} → ${fmt(p.cp)}</div><div class="why">${explain(k)}</div>`;
   let btns='';
@@ -370,7 +452,7 @@ function renderStrip(){$('stripwrap').classList.toggle('dim',!!line);
   document.querySelectorAll('#moments .km').forEach(e=>e.classList.toggle('on',!line&&+e.dataset.i===idx))}
 function render(){renderBoard();renderInfo();renderGraph();renderStrip()}
 function go(i,quiet,fromStrip){if(timer&&!quiet&&!inTick)stopPlay();
-  line=null;const prev=idx;idx=Math.max(0,Math.min(N,i));alt=false;render();
+  line=null;const prev=idx;idx=Math.max(0,Math.min(N,i));alt=false;render();if(idx!==prev)coachFor(idx);
   if(!fromStrip)centerStrip(idx,!quiet);
   if(!quiet&&Math.abs(idx-prev)===1)soundFor(idx);else if(!quiet&&idx!==prev&&idx>0)snd('move')}
 function step(d){go(idx+d)}
@@ -380,8 +462,8 @@ function stopPlay(){if(timer){clearInterval(timer);timer=null}$('bPlay').innerHT
 function startLine(k){const p=P[k];const mv=(p.pv&&p.pv.length)?p.pv:(p.b?[p.b]:[]);if(!mv.length)return;
   stopPlay();const bs=[boards[k].map(r=>r.slice())],sans=[];
   for(let j=0;j<mv.length;j++){const b=bs[j];sans.push(sanFull(b,mv[j],false));const nb=b.map(r=>r.slice());applyUci(nb,mv[j]);bs.push(nb)}
-  line={k,uci:mv,boards:bs,sans,i:0};alt=false;render();playLine()}
-function exitLine(){stopPlay();line=null;render();centerStrip(idx,true)}
+  line={k,uci:mv,boards:bs,sans,i:0};alt=false;render();say(p.c==='R'?'Here is the idea behind the sacrifice. Watch how the position pays off.':'This is what the engine had in mind instead. Watch how it plays out.','tip',2200);playLine()}
+function exitLine(){stopPlay();line=null;render();centerStrip(idx,true);coachFor(idx)}
 function playLine(){$('bPlay').innerHTML=IC.pause;
   timer=setInterval(()=>{if(!line||line.i>=line.uci.length){stopPlay();return}stepLine(1);if(line.i>=line.uci.length)stopPlay()},850)}
 function play(){if(line){if(timer){stopPlay();return}if(line.i>=line.uci.length)line.i=0;render();playLine();return}
@@ -396,9 +478,10 @@ function init(){
   $('sub').innerHTML=`${esc(M.welo)} vs ${esc(M.belo)} · ${esc(M.tc)} · ${M.opening_url?`<a href="${esc(M.opening_url)}" target="_blank" rel="noopener">${esc(M.opening)}</a>`:esc(M.opening)}${M.url?` · <a href="${esc(M.url)}" target="_blank" rel="noopener">chess.com</a>`:''}${M.term?`<br>${esc(M.term)}`:''}`;
   $('acc1').textContent=M.acc_me;$('acc1n').textContent='Your accuracy ('+me+')';
   $('acc2').textContent=M.acc_opp;$('acc2n').textContent='Opponent ('+opp+')';
-  $('counts').innerHTML=`Your moves: <i style="color:${COL.B}">${M.blunders} blunder${M.blunders===1?'':'s'}</i> · <i style="color:${COL.M}">${M.mistakes} mistake${M.mistakes===1?'':'s'}</i> · <i style="color:${COL.I}">${M.inaccuracies} inaccurac${M.inaccuracies===1?'y':'ies'}</i>`;
+  const nBr=P.filter((p,k)=>p.c==='R'&&k%2===mineSide).length;
+  $('counts').innerHTML=`Your moves: <i style="color:${COL.B}">${M.blunders} blunder${M.blunders===1?'':'s'}</i> · <i style="color:${COL.M}">${M.mistakes} mistake${M.mistakes===1?'':'s'}</i> · <i style="color:${COL.I}">${M.inaccuracies} inaccurac${M.inaccuracies===1?'y':'ies'}</i>`+(nBr?` · <i style="color:${COL.R}">${nBr} brilliant</i>`:'');
   document.title=M.white+' vs '+M.black;
-  buildStrip();buildMoments();render();centerStrip(0,false);
+  buildStrip();buildMoments();render();centerStrip(0,false);coachIntro();
 }
 $('bFirst').onclick=()=>{if(line){stopPlay();line.i=0;render()}else go(0)};$('bLast').onclick=()=>{if(line){stopPlay();line.i=line.uci.length;render()}else go(N)};$('bPrev').onclick=()=>stepAny(-1);$('bNext').onclick=()=>stepAny(1);
 $('bFirst').innerHTML=IC.first;$('bPrev').innerHTML=IC.prev;$('bNext').innerHTML=IC.next;$('bLast').innerHTML=IC.last;$('bFlip').innerHTML=IC.flip;$('bPlay').innerHTML=IC.play;
@@ -469,12 +552,24 @@ def build_viewer(s, username=""):
     payload = json.dumps(data, separators=(",", ":"), ensure_ascii=False).replace("</", "<\\/")
     meta = data["meta"]
     title = _html.escape(f"{meta['white']} vs {meta['black']}")
-    return TEMPLATE.replace("__TITLE__", title).replace("__PIECES__", _pieces_svg()).replace("__DATA__", payload)
+    return TEMPLATE.replace("__TITLE__", title).replace("__PIECES__", _pieces_svg()).replace("__SOUNDS__", _sounds_json()).replace("__DATA__", payload)
+
+
+def _sounds_json():
+    import pathlib
+    d = pathlib.Path(__file__).parent / "docs" / "sounds"
+    names = {"move": "Move.mp3", "capture": "Capture.mp3", "ok": "Confirmation.mp3"}
+    out = {}
+    for k, f in names.items():
+        p = d / f
+        if p.exists():
+            out[k] = base64.b64encode(p.read_bytes()).decode()
+    return json.dumps(out)
 
 
 def build_static_page():
     """The page that lives on GitHub Pages; the game itself comes in the URL after the #."""
-    return TEMPLATE.replace("__TITLE__", "Chess review").replace("__PIECES__", _pieces_svg()).replace("__DATA__", "")
+    return TEMPLATE.replace("__TITLE__", "Chess review").replace("__PIECES__", _pieces_svg()).replace("__SOUNDS__", _sounds_json()).replace("__DATA__", "")
 
 
 def review_url(base_url, s, username=""):

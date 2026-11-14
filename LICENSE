@@ -23,3 +23,9 @@ SOFTWARE.
 Third-party: the piece artwork in the review page is the "cburnett" set by Colin M.L. Burnett
 (shipped with python-chess; BSD / GPLv2+ / CC BY-SA 3.0). Stockfish (GPLv3) is installed at run
 time and is not redistributed here.
+
+Third-party sounds
+------------------
+docs/sounds/Move.mp3, Capture.mp3, Confirmation.mp3 are taken from the Lichess project
+(https://github.com/lichess-org/lila, public/sound/standard) and are licensed under the
+GNU Affero General Public License v3 or later, like the rest of lila.

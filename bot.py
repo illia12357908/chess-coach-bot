@@ -82,8 +82,8 @@ class Config:
         self.tg_token = clean_token(os.environ.get("TELEGRAM_BOT_TOKEN", ""))
         self.tg_chat = re.sub(r"\s+", "", os.environ.get("TELEGRAM_CHAT_ID", "")).strip("\"'")
         self.stockfish = os.environ.get("STOCKFISH_PATH", "stockfish")
-        self.depth = int(os.environ.get("ENGINE_DEPTH", "14"))
-        self.move_time = float(os.environ.get("ENGINE_MOVE_TIME", "0.6"))  # max sec/position
+        self.depth = int(os.environ.get("ENGINE_DEPTH", "16"))
+        self.move_time = float(os.environ.get("ENGINE_MOVE_TIME", "0.8"))  # max sec/position
         self.threads = int(os.environ.get("ENGINE_THREADS", "2"))
         self.hash_mb = int(os.environ.get("ENGINE_HASH_MB", "128"))
         self.poll_minutes = float(os.environ.get("POLL_MINUTES", "10"))
@@ -201,7 +201,68 @@ def win_pct(cp):
 
 
 def move_accuracy(loss_wp):
-    return max(0.0, min(100.0, 103.1668 * math.exp(-0.04354 * loss_wp) - 3.1668))
+    # Lichess' published formula, including its +1 "uncertainty bonus"
+    return max(0.0, min(100.0, 103.1668 * math.exp(-0.04354 * loss_wp) - 3.1668 + 1))
+
+
+def game_accuracy(accs, idxs, wp_series):
+    """Game accuracy the way Lichess does it: the average of a volatility-weighted mean (moves in sharp positions
+    count more) and a harmonic mean (a few bad moves pull the score down hard). A plain average is much too kind:
+    one blunder among 40 good moves barely moves it. accs: per-move accuracies, idxs: ply index of each move,
+    wp_series: White's win% after every ply (index 0 = start)."""
+    if not accs:
+        return None
+    n = len(wp_series)
+    win = max(2, min(8, n // 10))
+    weights = []
+    for i in idxs:
+        seg = wp_series[max(0, i - win // 2): i + win // 2 + 2]
+        mean = sum(seg) / len(seg)
+        sd = math.sqrt(sum((x - mean) ** 2 for x in seg) / len(seg))
+        weights.append(max(0.5, min(12.0, sd)))
+    weighted = sum(a * w for a, w in zip(accs, weights)) / sum(weights)
+    harmonic = len(accs) / sum(1.0 / max(a, 5.0) for a in accs)
+    return (weighted + harmonic) / 2
+
+
+def see(board, square):
+    """Static exchange evaluation: material the side to move wins (>0) or loses by capturing on `square`."""
+    target = board.piece_at(square)
+    if not target:
+        return 0
+    b = board.copy(stack=False)
+    side = b.turn
+    seq = []
+    while True:
+        atk = list(b.attackers(side, square))
+        if not atk:
+            break
+        a = min(atk, key=lambda sq: VALUES.get(b.piece_type_at(sq), 99))
+        pt = b.piece_type_at(a)
+        b.remove_piece_at(a)
+        b.remove_piece_at(square)
+        b.set_piece_at(square, chess.Piece(pt, side))
+        seq.append(VALUES.get(pt, 0))
+        side = not side
+        if len(seq) > 24:
+            break
+    if not seq:
+        return 0
+    g = [VALUES.get(target.piece_type, 0)]
+    for k in range(1, len(seq)):
+        g.append(seq[k - 1] - g[-1])
+    for k in range(len(g) - 1, 0, -1):
+        g[k - 1] = -max(-g[k - 1], g[k])
+    return g[0]
+
+
+def hanging_value(board, color):
+    """Most material the opponent (to move) can win by capturing one of `color`'s pieces."""
+    best = 0
+    for sq, p in board.piece_map().items():
+        if p.color == color and p.piece_type != chess.KING:
+            best = max(best, see(board, sq))
+    return best
 
 
 def classify(loss_wp):
@@ -350,9 +411,6 @@ def analyse_game(pgn_text, username, engine, limit, extra=None):
         cp_b, cp_a = evals[i]["cp"] * sign, evals[i + 1]["cp"] * sign
         best = evals[i]["best"]
         loss = 0.0 if (best is not None and node.move == best) else max(0.0, win_pct(cp_b) - win_pct(cp_a))
-        # no "mistakes" once the game is already totally decided either way
-        if win_pct(cp_b) > 97 or win_pct(cp_b) < 3:
-            loss = min(loss, 4.0)
         cls = classify(loss)
         san = b.san(node.move)
         r = {
@@ -398,6 +456,11 @@ def analyse_game(pgn_text, username, engine, limit, extra=None):
     def avg(rs):
         return sum(x["acc"] for x in rs) / len(rs) if rs else None
 
+    wp_white = [win_pct(e["cp"]) for e in evals]
+
+    def gacc(rs):
+        return game_accuracy([x["acc"] for x in rs], [x["ply"] for x in rs], wp_white)
+
     phase_acc = {}
     for ph in ("opening", "middlegame", "endgame"):
         v = avg([r for r in mine if r["phase"] == ph])
@@ -438,24 +501,36 @@ def analyse_game(pgn_text, username, engine, limit, extra=None):
         for t in r["tags"]:
             tags[t] += 1
 
-    # Brilliant: a (near-)best move that really gives up material, in a position that is not already won,
-    # and the sacrifice is still on the board two plies later (so it is not just a trade).
+    # Brilliant: a (near-)best move that really offers material, in a position that is not already won and not lost.
+    # Either it puts a piece where the opponent can win material by taking it (static exchange), or the sacrifice
+    # is really played and is still missing two and four plies later.
     def material(b, c):
         return sum(VALUES.get(p.piece_type, 0) * (1 if p.color == c else -1) for p in b.piece_map().values())
 
     brill = set()
     for r in recs:
         i = r["ply"]
-        if r["loss"] >= 2 or i + 2 >= len(boards):
+        if r["loss"] >= 2 or i + 1 >= len(boards):
             continue
-        end = boards[min(i + 3, len(boards) - 1)]
         mover = r["color"]
-        if win_pct(r["cp_before"]) >= 85 or win_pct(r["cp_after"]) < 45:
+        if win_pct(r["cp_before"]) >= 92 or win_pct(r["cp_after"]) < 40 or r["ply"] < 6:
             continue
-        if material(end, mover) - material(boards[i], mover) <= -3 and \
-                material(boards[i + 2], mover) - material(boards[i], mover) <= -3:
+        before, after = boards[i], boards[i + 1]
+        mv = nodes[i].move
+        got = captured_value(before, mv)
+        offered = False
+        if not after.is_game_over():
+            pre = before.copy()
+            pre.turn = not mover
+            t_before = 0 if pre.is_check() else hanging_value(pre, mover)
+            t_after = hanging_value(after, mover)
+            offered = t_after - got >= 2 and t_after > t_before
+        if not offered and i + 4 < len(boards):
+            m0 = material(boards[i], mover)
+            offered = (material(boards[i + 2], mover) - m0 <= -3 and material(boards[i + 4], mover) - m0 <= -3)
+        if offered:
             brill.add(i)
-    my_brilliants = [{"move_no": r["move_no"], "san": r["san"]} for r in mine if r["ply"] in brill]
+    my_brilliants = [{"move_no": r["move_no"], "san": r["san"], "color": "w" if r["color"] == chess.WHITE else "b"} for r in mine if r["ply"] in brill]
 
     result = {
         "brilliants": my_brilliants,
@@ -467,8 +542,8 @@ def analyse_game(pgn_text, username, engine, limit, extra=None):
         "opp": opp, "opp_rating": opp_elo, "my_rating": my_elo,
         "outcome": outcome, "termination": h.get("Termination", ""),
         "opening": opening, "opening_url": opening_url,
-        "accuracy": round(avg(mine) or 0, 1),
-        "opp_accuracy": round(avg(theirs) or 0, 1),
+        "accuracy": round(gacc(mine) or 0, 1),
+        "opp_accuracy": round(gacc(theirs) or 0, 1),
         "blunders": sum(r["cls"] == "blunder" for r in mine),
         "mistakes": sum(r["cls"] == "mistake" for r in mine),
         "inaccuracies": sum(r["cls"] == "inaccuracy" for r in mine),
@@ -567,7 +642,7 @@ def game_positives(s):
     out = []
     if s["blunders"] == 0:
         out.append("No blunders")
-    if s["accuracy"] >= 85:
+    if s["accuracy"] >= 80:
         out.append(f"High accuracy ({s['accuracy']})")
     pa = s["phase_acc"]
     if pa.get("opening", 0) >= 90 and not s["early_error"]:
@@ -578,8 +653,6 @@ def game_positives(s):
         out.append("Fought back from a bad position")
     if s["outcome"] == "win" and s["accuracy"] >= s["opp_accuracy"] + 5:
         out.append("Outplayed the opponent")
-    for b in s.get("brilliants", [])[:2]:
-        out.append(f"✨ Brilliant move: {b['move_no']}. {b['san']}!!")
     if s["moves"] and s["best_moves"] / s["moves"] >= 0.5:
         out.append(f"{s['best_moves']}/{s['moves']} moves matched the engine's top choice")
     return out
@@ -607,6 +680,10 @@ def format_report(s):
     lines.append("")
     lines.append(f"🎯 Accuracy: <b>{s['accuracy']}</b> (opponent {s['opp_accuracy']})")
     lines.append(f"🔴 Blunders {s['blunders']} · 🟠 Mistakes {s['mistakes']} · 🟡 Inaccuracies {s['inaccuracies']}")
+    brs = s.get("brilliants") or []
+    if brs:
+        lines.append("✨ <b>Brilliant moves:</b> " + ", ".join(
+            f"{b['move_no']}{'.' if b.get('color', 'w') == 'w' else '...'}{esc(b['san'])}!!" for b in brs[:4]))
     if s["phase_acc"]:
         pretty = " · ".join(f"{k.capitalize()} {v}" for k, v in s["phase_acc"].items())
         lines.append(f"📊 By phase: {pretty}")
