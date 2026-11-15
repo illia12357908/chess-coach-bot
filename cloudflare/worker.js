@@ -224,6 +224,18 @@ async function forwardToBot(env, update) {
   if (r.status !== 204) throw new Error(`GitHub dispatch failed: HTTP ${r.status} ${await r.text()}`);
 }
 
+// Plain-text requests like "скинь последнюю партию" or the bottom-keyboard buttons run the bot instead of the chat.
+function intentCommand(text) {
+  const t = text.toLowerCase().trim();
+  if (t.includes("последняя партия")) return "/latest";
+  if (t.includes("проверить новые")) return "/check";
+  const game = /(парти|игр[уы]|game|разбор|review)/.test(t);
+  if (!game) return null;
+  if (/(обнови|проверь|refresh|check)/.test(t) || (/(скин|пришли|отправ|покаж|дай|send|show|give)/.test(t) && /(нов[ыуа]|new)/.test(t) && !/(последн|прошл|latest|last)/.test(t))) return "/check";
+  if (/(скин|пришли|отправ|покаж|дай|send|show|give)/.test(t) && /(последн|прошл|latest|last)/.test(t)) return "/latest";
+  return null;
+}
+
 async function handleUpdate(env, update) {
   const chatOf = update.callback_query ? (update.callback_query.message || {}).chat : (update.message || {}).chat;
   if (!chatOf || String(chatOf.id) !== String(env.TELEGRAM_CHAT_ID).trim()) return; // only the owner
@@ -236,8 +248,10 @@ async function handleUpdate(env, update) {
     const m = update.message;
     const text = (m.text || "").trim();
     if (!text) return;
-    if (text.startsWith("/")) {
-      await tg(env, "sendChatAction", { chat_id: chatOf.id, action: "typing" });
+    const cmd = text.startsWith("/") ? null : intentCommand(text);
+    if (text.startsWith("/") || cmd) {
+      await tg(env, "sendMessage", { chat_id: chatOf.id, text: "⏳ Ищу партию и запускаю разбор, это займёт около минуты…" });
+      if (cmd) update = { ...update, message: { ...update.message, text: cmd } };
       await forwardToBot(env, update);
       return;
     }
@@ -256,6 +270,10 @@ async function handleUpdate(env, update) {
 
 async function setupWebhook(env, origin, off) {
   if (off) return tg(env, "deleteWebhook", {});
+  await tg(env, "sendMessage", {
+    chat_id: env.TELEGRAM_CHAT_ID, text: "Кнопки быстрого доступа — внизу 👇",
+    reply_markup: { keyboard: [[{ text: "🔍 Последняя партия" }, { text: "🔄 Проверить новые" }]], resize_keyboard: true, is_persistent: true },
+  });
   return tg(env, "setWebhook", {
     url: `${origin}/telegram`,
     secret_token: env.TG_WEBHOOK_SECRET,
@@ -309,7 +327,7 @@ export default {
       const res = await check(env);
       const config = { user: !!env.CHESSCOM_USERNAME, repo: !!env.GITHUB_REPO, token: !!env.GITHUB_TOKEN,
         chat: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID && env.ANTHROPIC_API_KEY && env.TG_WEBHOOK_SECRET) };
-      return Response.json({ ok: true, version: "v6-coach", config, decision: res });
+      return Response.json({ ok: true, version: "v7-buttons", config, decision: res });
     } catch (e) {
       return Response.json({ ok: false, error: String(e) }, { status: 500 });
     }

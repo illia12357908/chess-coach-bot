@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: chess-action
@@ -27,6 +28,7 @@ jobs:
       STOCKFISH_PATH: /usr/games/stockfish
       TIMEZONE: ${{ vars.TIMEZONE || 'Europe/Madrid' }}
       DATA_DIR: data
+      GH_TOKEN: ${{ github.token }}
       UPDATE_JSON: ${{ github.event.inputs.update }}
     steps:
       - uses: actions/checkout@v4
@@ -43,6 +45,13 @@ jobs:
           pip install -r requirements.txt
       - name: Handle the update
         run: python bot.py --update "$UPDATE_JSON"
+      - name: Keep the bot awake (start live mode if it is not running)
+        if: always()
+        run: |
+          n=$(gh run list --workflow chess-live.yml --json status --jq '[.[]|select(.status=="in_progress" or .status=="queued")]|length')
+          if [ "${n:-0}" = "0" ]; then
+            gh workflow run chess-live.yml -f minutes=330 -f idle=120 -f quiet=true
+          fi
       - name: Save state
         if: always()
         run: |

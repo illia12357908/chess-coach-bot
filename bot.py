@@ -1032,6 +1032,10 @@ PAGE = 8
 OUT_ICON = {"win": "✅", "loss": "❌", "draw": "🤝"}
 
 
+REPLY_KB = {"keyboard": [[{"text": "🔍 Последняя партия"}, {"text": "🔄 Проверить новые"}]],
+            "resize_keyboard": True, "is_persistent": True}
+
+
 def main_menu():
     return {"inline_keyboard": [
         [{"text": "🔍 Latest game", "callback_data": "latest"},
@@ -1092,6 +1096,7 @@ def analyse_and_send(cfg, state, g, chat=None):
 def do_action(cfg, state, data, chat, msg_id=None, msg_text=""):
     if data in ("menu", "start"):
         tg_send(cfg, MENU_TEXT, chat, markup=main_menu())
+        tg_send(cfg, "Кнопки быстрого доступа — внизу 👇", chat, markup=REPLY_KB)
     elif data == "week":
         send_digest(cfg, state, 7, chat)
     elif data == "month":
